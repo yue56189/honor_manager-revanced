@@ -1,0 +1,40 @@
+ECController 第三方组件声明
+===========================
+
+本软件随包分发以下第三方组件。各组件版权归其各自作者所有，并按下列许可条款提供。
+
+--------------------------------------------------------------------------------
+1. WinRing0
+--------------------------------------------------------------------------------
+
+  用途      : 提供 Ring0 层端口 I/O 能力，用于读写 EC 寄存器
+  随包文件  : Drivers\WinRing0x64.sys
+  源码位置  : 本仓库 winring0\ 目录
+  上游仓库  : https://github.com/GermanAizek/WinRing0
+  许可证    : GNU General Public License v3.0 (GPL-3.0)
+
+  版权声明:
+    Copyright (C) 2007-2009 hiyohiyo (original author)
+    Copyright (C) 2019-2024 GermanAizek (current maintainer)
+
+  WinRing0 采用 GPL-3.0 这一强 copyleft 许可。因此本软件整体亦按 GPL-3.0 分发，
+  完整条款见同目录下的 LICENSE 文件，或 https://www.gnu.org/licenses/gpl-3.0.html
+
+  GPL-3.0 要求：以目标代码形式分发时，须同时提供或承诺提供对应的完整源码。
+  本软件源码发布于 https://github.com/yue56189/honor_manager-revanced
+  其中包含 WinRing0 的完整源码（winring0\ 目录）。
+
+  如需闭源商业使用，必须先移除 WinRing0 相关部分，改用其它许可兼容的
+  内核驱动方案（例如自行签署的驱动，或改走系统 ACPI EC 接口）。
+
+--------------------------------------------------------------------------------
+2. System.Resources.Extensions
+--------------------------------------------------------------------------------
+
+  用途      : 处理含图片资源的 .resx（仅构建期需要，不随发布包分发）
+  版权声明  : Copyright (c) .NET Foundation and Contributors
+  许可证    : MIT License
+
+  完整条款见 https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+--------------------------------------------------------------------------------
