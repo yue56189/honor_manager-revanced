@@ -212,7 +212,7 @@
             this.cardOptions.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.cardOptions.Name = "cardOptions";
             this.cardOptions.Padding = new System.Windows.Forms.Padding(16, 46, 16, 16);
-            this.cardOptions.Size = new System.Drawing.Size(508, 184);
+            this.cardOptions.Size = new System.Drawing.Size(508, 154);
             this.cardOptions.TabIndex = 8;
             this.cardOptions.Title = "启动与运行";
             //
@@ -266,7 +266,7 @@
             this.lblBootDelay.BackColor = System.Drawing.Color.Transparent;
             this.lblBootDelay.Font = ECController.Theme.FluentTheme.CaptionFont;
             this.lblBootDelay.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
-            this.lblBootDelay.Location = new System.Drawing.Point(160, 89);
+            this.lblBootDelay.Location = new System.Drawing.Point(160, 86);
             this.lblBootDelay.Name = "lblBootDelay";
             this.lblBootDelay.Size = new System.Drawing.Size(68, 17);
             this.lblBootDelay.TabIndex = 4;
@@ -275,7 +275,7 @@
             // numBootDelay
             //
             this.numBootDelay.Font = ECController.Theme.FluentTheme.BodyFont;
-            this.numBootDelay.Location = new System.Drawing.Point(236, 85);
+            this.numBootDelay.Location = new System.Drawing.Point(236, 82);
             this.numBootDelay.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.numBootDelay.Maximum = new decimal(new int[] { 300, 0, 0, 0 });
             this.numBootDelay.Name = "numBootDelay";
@@ -291,7 +291,7 @@
             this.lblDelayUnit.BackColor = System.Drawing.Color.Transparent;
             this.lblDelayUnit.Font = ECController.Theme.FluentTheme.CaptionFont;
             this.lblDelayUnit.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
-            this.lblDelayUnit.Location = new System.Drawing.Point(304, 89);
+            this.lblDelayUnit.Location = new System.Drawing.Point(304, 86);
             this.lblDelayUnit.Name = "lblDelayUnit";
             this.lblDelayUnit.Size = new System.Drawing.Size(98, 17);
             this.lblDelayUnit.TabIndex = 6;
@@ -299,7 +299,7 @@
             //
             // chkTray
             //
-            this.chkTray.Location = new System.Drawing.Point(20, 122);
+            this.chkTray.Location = new System.Drawing.Point(20, 114);
             this.chkTray.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.chkTray.Name = "chkTray";
             this.chkTray.Size = new System.Drawing.Size(150, 24);
@@ -313,7 +313,7 @@
             this.pnlActions.Controls.Add(this.btnApply);
             this.pnlActions.Controls.Add(this.btnRestore);
             this.pnlActions.Controls.Add(this.btnExit);
-            this.pnlActions.Location = new System.Drawing.Point(20, 642);
+            this.pnlActions.Location = new System.Drawing.Point(20, 612);
             this.pnlActions.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.pnlActions.Name = "pnlActions";
             this.pnlActions.Size = new System.Drawing.Size(508, 40);
@@ -378,7 +378,7 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = ECController.Theme.FluentTheme.WindowBackground;
-            this.ClientSize = new System.Drawing.Size(548, 714);
+            this.ClientSize = new System.Drawing.Size(548, 684);
             this.Controls.Add(this.lblTitle);
             this.Controls.Add(this.lblDivider);
             this.Controls.Add(this.lblFunction);

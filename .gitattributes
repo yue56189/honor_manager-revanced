@@ -1,0 +1,17 @@
+# 换行策略：仓库内统一 LF，工作区按 core.autocrlf 决定。
+#
+# 为什么要显式写：没有这个文件时，用脚本批量复制源码会让 git 只凭 mtime/size
+# 误报一批"已修改"，而 git diff 又什么都没有。固定策略后行为可预测。
+* text=auto
+
+# 二进制资源，禁止任何换行转换
+*.sys  -text
+*.dll  -text
+*.ico  -text
+*.exe  -text
+*.png  -text
+*.jpg  -text
+
+# Windows 脚本必须 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf

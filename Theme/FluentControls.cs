@@ -59,6 +59,31 @@ namespace ECController.Theme
     }
 
     /// <summary>
+    /// 自绘控件的背景清理。
+    ///
+    /// 为什么必须显式做这件事：<c>ButtonBase</c>（Button / CheckBox / RadioButton 的基类）
+    /// 在构造时打开了 <c>ControlStyles.Opaque</c>。该样式表示"控件自己负责整个区域，
+    /// 不要帮我擦背景"；而 WinForms 只有在 Opaque 关闭时才会调用 OnPaintBackground。
+    /// 一旦某控件同时是 Opaque 且 BackColor 为 Transparent，就没有任何一方负责擦除，
+    /// 开启双缓冲后图面会被反复复用——上一帧、甚至别的窗口留下的像素会一直残留在
+    /// 控件区域里，看起来就是"元素重叠、文字重影"。
+    ///
+    /// 因此自绘控件统一：关掉 Opaque，并在这里用父级的有效底色铺满自身区域。
+    /// </summary>
+    internal static class FluentBackground
+    {
+        /// <summary>用父控件的底色铺满控件区域（父级为空的极端情况回退到窗体底色）。</summary>
+        public static void Fill(Control c, Graphics g)
+        {
+            Color outer = c.Parent != null ? c.Parent.BackColor : FluentTheme.WindowBackground;
+            if (outer.A == 0) outer = FluentTheme.WindowBackground;
+
+            using (SolidBrush b = new SolidBrush(outer))
+                g.FillRectangle(b, c.ClientRectangle);
+        }
+    }
+
+    /// <summary>
     /// Fluent 卡片容器：圆角、白底、极轻描边，可选标题。
     /// 不派生于 GroupBox，因此完全掌控外观。
     /// </summary>
@@ -70,8 +95,16 @@ namespace ECController.Theme
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = FluentTheme.WindowBackground;
+            // 卡片自绘的是白底圆角，BackColor 必须与之一致：
+            // 子控件的透明合成取的是父级 BackColor，不一致就会在控件区域留下灰色补丁。
+            BackColor = FluentTheme.CardBackground;
             Padding = new Padding(FluentTheme.CardPadding);
+        }
+
+        /// <summary>圆角之外要露出窗体底色，所以先铺父级颜色，再由 OnPaint 画圆角白底。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            FluentBackground.Fill(this, e.Graphics);
         }
 
         /// <summary>卡片标题（为空则不占标题高度）。</summary>
@@ -125,12 +158,21 @@ namespace ECController.Theme
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            // ButtonBase 默认开着 Opaque（表示"不用帮我擦背景"），
+            // 与 Transparent 叠加会让圆角外残留上一帧像素，必须显式关掉。
+            SetStyle(ControlStyles.Opaque, false);
             FlatStyle = FlatStyle.Flat;
             FlatAppearance.BorderSize = 0;
             BackColor = Color.Transparent;
             Font = FluentTheme.BodyFont;
             Cursor = Cursors.Hand;
             Height = 34;
+        }
+
+        /// <summary>圆角外露出父级底色，避免按钮四角出现方块。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            FluentBackground.Fill(this, e.Graphics);
         }
 
         /// <summary>是否为主操作按钮（强调色）。</summary>
@@ -198,11 +240,19 @@ namespace ECController.Theme
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            // 见 FluentBackground 注释：Opaque + Transparent = 没人擦背景，出重影。
+            SetStyle(ControlStyles.Opaque, false);
             BackColor = Color.Transparent;
             Font = FluentTheme.BodyFont;
             AutoSize = false;
             Height = 24;
             Cursor = Cursors.Hand;
+        }
+
+        /// <summary>自绘控件不擦背景就会留下上一帧的残影，这里铺上父级底色。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            FluentBackground.Fill(this, e.Graphics);
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -272,6 +322,9 @@ namespace ECController.Theme
     /// </summary>
     public class FluentComboBox : ComboBox
     {
+        /// <summary>右端需要盖掉原生绘制、留给自绘箭头的宽度。</summary>
+        private const int ArrowAreaWidth = 30;
+
         private bool _hover;
 
         public FluentComboBox()
@@ -302,6 +355,13 @@ namespace ECController.Theme
         {
             Draw.WithSmoothing(g, gg =>
             {
+                // 原生 ComboBox 会在右端自己画一个下拉按钮和箭头，与这里的自绘 V 叠在一起
+                // 变成"两个箭头"。先用控件底色把右端这一条盖掉，再画我们自己的边框和箭头。
+                using (SolidBrush b = new SolidBrush(FluentTheme.InputBackground))
+                    gg.FillRectangle(b, new Rectangle(
+                        Math.Max(0, Width - ArrowAreaWidth), 1,
+                        Math.Max(0, ArrowAreaWidth - 1), Math.Max(0, Height - 2)));
+
                 Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
                 using (Pen p = new Pen(_hover ? FluentTheme.InputBorderHover : FluentTheme.InputBorder, 1f))
                     gg.DrawRectangle(p, r);
@@ -359,11 +419,19 @@ namespace ECController.Theme
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            // 同 FluentCheckBox：必须关掉 ButtonBase 带来的 Opaque。
+            SetStyle(ControlStyles.Opaque, false);
             BackColor = Color.Transparent;
             Font = FluentTheme.BodyFont;
             AutoSize = false;
             Height = 24;
             Cursor = Cursors.Hand;
+        }
+
+        /// <summary>自绘控件不擦背景就会留下上一帧的残影，这里铺上父级底色。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            FluentBackground.Fill(this, e.Graphics);
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
