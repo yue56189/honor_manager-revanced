@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
+using ECController.Models;
 using ECController.Services;
 
 namespace ECController.Config
@@ -18,6 +21,17 @@ namespace ECController.Config
         private const string FileName = "config.json";
 
         private const string BackupSuffix = ".bad";
+
+        /// <summary>
+        /// 与本类写出的 BootSelections 数组条目一一对应。
+        /// 用正则而不是完整 JSON 解析：只需认出
+        /// <c>{ "Group": "x", "Mode": "y" }</c> 这种对象，\s 已覆盖换行，
+        /// 所以用户手工把条目折行也不会失效；认不出来就当没有该项（不抛异常）。
+        /// </summary>
+        private static readonly Regex SelectionPattern = new Regex(
+            "\\{\\s*\"Group\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\s*," +
+            "\\s*\"Mode\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\s*\\}",
+            RegexOptions.Compiled);
 
         /// <summary>配置文件完整路径。</summary>
         public static string SettingsPath
@@ -36,8 +50,12 @@ namespace ECController.Config
         /// </summary>
         public static AppSettings Load()
         {
-            string path = SettingsPath;
+            return LoadFrom(SettingsPath);
+        }
 
+        /// <summary>从指定路径加载，便于测试。</summary>
+        public static AppSettings LoadFrom(string path)
+        {
             if (!File.Exists(path))
             {
                 Logger.Info("config.json 不存在，使用默认设置。");
@@ -50,7 +68,11 @@ namespace ECController.Config
                 AppSettings settings = Parse(json);
                 settings.Normalize();
 
-                Logger.Info("已加载 config.json。");
+                Logger.Info(string.Format(
+                    "已加载 config.json：开机启动={0}，登录自动应用={1}（{2} 项）。",
+                    settings.AutoStart,
+                    settings.ApplyOnBoot,
+                    settings.BootSelections.Count));
 
                 return settings;
             }
@@ -69,12 +91,17 @@ namespace ECController.Config
         /// </summary>
         public static bool Save(AppSettings settings)
         {
+            return SaveTo(settings, SettingsPath);
+        }
+
+        /// <summary>保存到指定路径，便于测试。</summary>
+        public static bool SaveTo(AppSettings settings, string path)
+        {
             if (settings == null)
                 return false;
 
             settings.Normalize();
 
-            string path = SettingsPath;
             string temp = path + ".tmp";
 
             try
@@ -133,16 +160,37 @@ namespace ECController.Config
         /// <summary>序列化为带缩进的 JSON，方便用户手工编辑。</summary>
         public static string Serialize(AppSettings s)
         {
+            if (s == null)
+                return "{}";
+
+            s.Normalize();
+
             StringBuilder sb = new StringBuilder();
 
             sb.AppendLine("{");
             sb.AppendLine("    \"AutoStart\": " + Bool(s.AutoStart) + ",");
             sb.AppendLine("    \"ApplyOnBoot\": " + Bool(s.ApplyOnBoot) + ",");
             sb.AppendLine("    \"Tray\": " + Bool(s.Tray) + ",");
-            sb.AppendLine("    \"BootGroup\": " + Quote(s.BootGroup) + ",");
-            sb.AppendLine("    \"BootMode\": " + Quote(s.BootMode) + ",");
             sb.AppendLine("    \"WaitTime\": " + s.WaitTime.ToString(CultureInfo.InvariantCulture) + ",");
-            sb.AppendLine("    \"BootDelaySeconds\": " + s.BootDelaySeconds.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("    \"BootDelaySeconds\": " + s.BootDelaySeconds.ToString(CultureInfo.InvariantCulture) + ",");
+
+            // 每个功能组一项；一项一行，方便手工编辑
+            sb.AppendLine("    \"BootSelections\": [");
+
+            for (int i = 0; i < s.BootSelections.Count; i++)
+            {
+                BootSelection sel = s.BootSelections[i];
+
+                sb.Append("        { \"Group\": " + Quote(sel.Group)
+                    + ", \"Mode\": " + Quote(sel.Mode) + " }");
+
+                if (i < s.BootSelections.Count - 1)
+                    sb.Append(',');
+
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("    ]");
             sb.Append("}");
 
             return sb.ToString();
@@ -159,14 +207,30 @@ namespace ECController.Config
             if (string.IsNullOrEmpty(json))
                 return s;
 
-            // 去掉最外层花括号后按行扫描
+            // BootSelections 是唯一一个嵌套结构，单独用正则抽取
+            foreach (Match m in SelectionPattern.Matches(json))
+            {
+                s.BootSelections.Add(new BootSelection(
+                    Unquote(m.Groups[1].Value),
+                    Unquote(m.Groups[2].Value)));
+            }
+
+            // 去掉最外层花括号后按行扫描标量键
             string body = json.Replace("{", string.Empty).Replace("}", string.Empty);
+
+            string legacyGroup = null;
+            string legacyMode = null;
+            bool legacyApply = false;
 
             foreach (string rawLine in body.Split('\n'))
             {
                 string line = rawLine.Trim();
 
                 if (line.Length == 0)
+                    continue;
+
+                // 跳过 BootSelections 的条目行与数组括号行
+                if (line.StartsWith("[") || line.StartsWith("]") || line.IndexOf('{') >= 0)
                     continue;
 
                 // 去掉行尾逗号
@@ -189,18 +253,20 @@ namespace ECController.Config
 
                     case "ApplyOnBoot":
                         s.ApplyOnBoot = ParseBool(value, false);
+                        legacyApply = s.ApplyOnBoot;
                         break;
 
                     case "Tray":
                         s.Tray = ParseBool(value, false);
                         break;
 
+                    // 旧版字段：读进来做迁移，不再写出
                     case "BootGroup":
-                        s.BootGroup = Unquote(value);
+                        legacyGroup = Unquote(value);
                         break;
 
                     case "BootMode":
-                        s.BootMode = Unquote(value);
+                        legacyMode = Unquote(value);
                         break;
 
                     case "WaitTime":
@@ -211,6 +277,14 @@ namespace ECController.Config
                         s.BootDelaySeconds = ParseInt(value, 5);
                         break;
                 }
+            }
+
+            if (s.BootSelections.Count == 0 &&
+                !string.IsNullOrEmpty(legacyGroup) &&
+                !string.IsNullOrEmpty(legacyMode))
+            {
+                s.LegacySelection = new BootSelection(legacyGroup, legacyMode);
+                s.LegacyApplyOnBoot = legacyApply;
             }
 
             return s;

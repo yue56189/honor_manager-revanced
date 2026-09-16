@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 
 namespace ECController.Theme
@@ -10,7 +11,9 @@ namespace ECController.Theme
     public static class FluentTheme
     {
         // ---- 背景层次 ----
-        /// <summary>窗体底色（Fluent 的 mica 近似色）</summary>
+        /// <summary>
+        /// 窗体底色。也是"读不到壁纸/非 Win11"时的回退色。
+        /// </summary>
         public static readonly Color WindowBackground = Color.FromArgb(243, 243, 243);
 
         /// <summary>卡片/内容区底色</summary>
@@ -112,27 +115,57 @@ namespace ECController.Theme
         private const string PreferFont = "微软雅黑";
         private const string FallbackFont = "Segoe UI";
 
-        /// <summary>根据字号取得正文字体（自动挑选可用字体）</summary>
+        private static string _fontFamilyName;
+        private static bool _fontMissing;
+
+        /// <summary>
+        /// 根据字号取得正文字体（微软雅黑优先，回退 Segoe UI）。
+        /// 字体族名字只解析一次——原来每次 new Font 都遍历整个 FontFamily.Families，
+        /// 控件多的时候这是个明显的启动开销。
+        /// </summary>
         public static Font Font(float size, FontStyle style = FontStyle.Regular)
         {
             return new Font(FontFamilyName, size, style);
         }
 
-        /// <summary>可用字体族名（微软雅黑优先，回退 Segoe UI）</summary>
+        /// <summary>可用字体族名（微软雅黑优先，回退 Segoe UI）。</summary>
         public static string FontFamilyName
         {
             get
             {
-                foreach (FontFamily f in FontFamily.Families)
+                if (_fontMissing)
+                    return _fontFamilyName ?? FontFamily.GenericSansSerif.Name;
+
+                if (_fontFamilyName != null)
+                    return _fontFamilyName;
+
+                try
                 {
-                    if (f.Name == PreferFont) return PreferFont;
+                    foreach (FontFamily f in FontFamily.Families)
+                    {
+                        if (f.Name == PreferFont) { _fontFamilyName = PreferFont; return _fontFamilyName; }
+                    }
+
+                    foreach (FontFamily f in FontFamily.Families)
+                    {
+                        if (f.Name == FallbackFont) { _fontFamilyName = FallbackFont; return _fontFamilyName; }
+                    }
                 }
-                foreach (FontFamily f in FontFamily.Families)
+                catch
                 {
-                    if (f.Name == FallbackFont) return FallbackFont;
+                    _fontMissing = true;
                 }
-                return FontFamily.GenericSansSerif.Name;
+
+                _fontFamilyName = FontFamily.GenericSansSerif.Name;
+
+                return _fontFamilyName;
             }
+        }
+
+        /// <summary>是否用上了首选的微软雅黑（供界面/日志说明）。</summary>
+        public static bool UsingPreferredFont
+        {
+            get { return FontFamilyName == PreferFont; }
         }
 
         /// <summary>标题字体（16pt 半粗）</summary>
@@ -146,5 +179,86 @@ namespace ECController.Theme
 
         /// <summary>说明文字（略小、次要色）</summary>
         public static Font CaptionFont { get { return Font(8.5f); } }
+
+        // ---- 客户区底纹（Mica 风格模拟）----
+        private static Bitmap _backdrop;
+
+        /// <summary>
+        /// 当前窗体的客户区底纹。为空时一切回退到 <see cref="WindowBackground"/>。
+        ///
+        /// 由于 WinForms 里 DWM 材质进不了客户区（见 <see cref="Mica"/> 的注释），
+        /// 这里用"壁纸强模糊 + 浅色光罩"合成一张位图作为窗体背景，
+        /// 卡片圆角外侧等裸露区域也要从这张图里取色，否则会出现色块补丁。
+        /// </summary>
+        public static Bitmap Backdrop
+        {
+            get { return _backdrop; }
+        }
+
+        /// <summary>底纹在窗体上的平均色，用于 StatusStrip 等无法透明的原生控件。</summary>
+        public static Color BackdropAverage { get; private set; }
+
+        public static void SetBackdrop(Bitmap bitmap)
+        {
+            if (ReferenceEquals(_backdrop, bitmap))
+                return;
+
+            Bitmap old = _backdrop;
+            _backdrop = bitmap;
+            BackdropAverage = ComputeAverage(bitmap);
+
+            if (old != null)
+                old.Dispose();
+        }
+
+        /// <summary>底纹上某点的颜色；没有底纹时返回窗体底色。</summary>
+        public static Color BackdropAt(int x, int y)
+        {
+            Bitmap bd = _backdrop;
+
+            if (bd == null)
+                return WindowBackground;
+
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x >= bd.Width) x = bd.Width - 1;
+            if (y >= bd.Height) y = bd.Height - 1;
+
+            return bd.GetPixel(x, y);
+        }
+
+        private static Color ComputeAverage(Bitmap bitmap)
+        {
+            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+                return WindowBackground;
+
+            try
+            {
+                // 抽样即可，不必遍历每个像素
+                int stepX = Math.Max(1, bitmap.Width / 24);
+                int stepY = Math.Max(1, bitmap.Height / 24);
+
+                long r = 0, g = 0, b = 0;
+                int n = 0;
+
+                for (int y = 0; y < bitmap.Height; y += stepY)
+                {
+                    for (int x = 0; x < bitmap.Width; x += stepX)
+                    {
+                        Color c = bitmap.GetPixel(x, y);
+                        r += c.R; g += c.G; b += c.B; n++;
+                    }
+                }
+
+                if (n == 0)
+                    return WindowBackground;
+
+                return Color.FromArgb((int)(r / n), (int)(g / n), (int)(b / n));
+            }
+            catch
+            {
+                return WindowBackground;
+            }
+        }
     }
 }

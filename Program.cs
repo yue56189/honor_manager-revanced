@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -98,12 +99,21 @@ namespace ECController
         /// <summary>
         /// 登录自动应用：不开窗口，直接写 EC，结果写日志 + 托盘气泡。
         /// 失败也不能弹阻塞式对话框，否则会卡住登录流程。
+        ///
+        /// 会依次应用配置里勾选的每个功能组（例如 性能模式 + 电池管理），
+        /// 一项失败不影响其余项，最后汇总结果。
         /// </summary>
         private static void RunApplyOnly(AppSettings settings)
         {
             if (!settings.ApplyOnBoot)
             {
                 Logger.Info("配置未启用登录自动应用，退出。");
+                return;
+            }
+
+            if (settings.BootSelections.Count == 0)
+            {
+                Logger.Warn("已启用登录自动应用，但没有勾选任何功能组，退出。");
                 return;
             }
 
@@ -117,14 +127,35 @@ namespace ECController
             }
 
             ParseResult parse = AddressParser.Load();
-            EcMode mode = FindMode(parse, settings.BootGroup, settings.BootMode);
 
-            if (mode == null)
+            // 先把每一项都解析出来：缺哪个单独记哪个，不因为一项写错就放弃其余的
+            List<string> labels = new List<string>();
+            List<EcMode> modes = new List<EcMode>();
+            List<string> missing = new List<string>();
+
+            foreach (BootSelection selection in settings.BootSelections)
             {
-                string detail = string.Format(
-                    "找不到配置的模式：功能组 \"{0}\"，模式 \"{1}\"。",
-                    settings.BootGroup,
-                    settings.BootMode);
+                EcMode mode = FindMode(parse, selection.Group, selection.Mode);
+
+                if (mode == null)
+                {
+                    missing.Add(selection.ToString());
+
+                    Logger.Error(string.Format(
+                        "找不到配置的模式：功能组 \"{0}\"，模式 \"{1}\"。",
+                        selection.Group,
+                        selection.Mode));
+
+                    continue;
+                }
+
+                labels.Add(selection.ToString());
+                modes.Add(mode);
+            }
+
+            if (modes.Count == 0)
+            {
+                string detail = "找不到任何可用模式：" + string.Join("、", missing.ToArray());
 
                 Logger.Error("自动应用失败：" + detail);
                 NotifyFailure("自动应用失败", detail);
@@ -144,19 +175,47 @@ namespace ECController
                     return;
                 }
 
-                ApplyResult result = service.Apply(mode);
+                List<string> applied = new List<string>();
+                List<string> failed = new List<string>();
 
-                if (result.Success)
+                for (int i = 0; i < modes.Count; i++)
                 {
-                    Logger.Info("自动应用成功：" + result.Message);
-                    NotifyFailure("EC Controller", "已自动应用：" + mode.Name,
-                        ToolTipIcon.Info);
+                    ApplyResult result = service.Apply(modes[i]);
+
+                    if (result.Success)
+                    {
+                        applied.Add(labels[i]);
+                        Logger.Info("自动应用成功：" + labels[i] + " —— " + result.Message);
+                    }
+                    else
+                    {
+                        failed.Add(labels[i] + "（" + result.Message + "）");
+                        Logger.Error("自动应用未完全成功：" + labels[i] + " —— " + result.Message);
+                    }
                 }
-                else
+
+                if (failed.Count == 0 && missing.Count == 0)
                 {
-                    Logger.Error("自动应用未完全成功：" + result.Message);
-                    NotifyFailure("自动应用未完全成功", result.Message);
+                    string text = "已自动应用：" + string.Join("、", applied.ToArray());
+
+                    Logger.Info(text);
+                    NotifyFailure("EC Controller", text, ToolTipIcon.Info);
+                    return;
                 }
+
+                string summary = string.Empty;
+
+                if (applied.Count > 0)
+                    summary += "已应用：" + string.Join("、", applied.ToArray()) + "\n";
+
+                if (failed.Count > 0)
+                    summary += "未成功：" + string.Join("、", failed.ToArray()) + "\n";
+
+                if (missing.Count > 0)
+                    summary += "配置里找不到：" + string.Join("、", missing.ToArray());
+
+                Logger.Error("自动应用未完全成功：" + summary.Replace("\n", " | "));
+                NotifyFailure("自动应用未完全成功", summary.TrimEnd());
             }
         }
 

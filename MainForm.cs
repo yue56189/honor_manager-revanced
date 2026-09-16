@@ -2,18 +2,26 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using ECController.Config;
 using ECController.Driver;
 using ECController.Models;
 using ECController.Services;
+using ECController.Theme;
 
 namespace ECController
 {
     public partial class MainForm : Form
     {
+        /// <summary>
+        /// 界面上正在编辑的设置。改动先落在这里，"保存配置"才写盘。
+        /// </summary>
         private readonly AppSettings _settings;
+
+        /// <summary>上次成功保存的快照，用来判断"有没有未保存的更改"。</summary>
+        private AppSettings _savedSettings;
 
         private readonly TrayManager _tray = new TrayManager();
 
@@ -27,18 +35,25 @@ namespace ECController
 
         private EcMode _currentMode;
 
+        /// <summary>配置里每个功能组在"启动后应用"区里对应的一行。</summary>
+        private readonly List<BootGroupRow> _bootRows = new List<BootGroupRow>();
+
         /// <summary>防止"退出中"被托盘菜单重复触发。</summary>
         private bool _exiting;
 
         /// <summary>真正的退出（区别于最小化到托盘）。</summary>
         private bool _reallyExit;
 
-        /// <summary>程序正在执行耗时 EC 操作，忽略勾选框变更的保存。</summary>
+        /// <summary>程序正在执行耗时 EC 操作或批量改控件状态，忽略控件事件的保存/脏标记。</summary>
         private bool _suppressSettingEvents;
+
+        /// <summary>底纹用的窗口位置，用来判断窗口是否真的移动了。</summary>
+        private Point _backdropOrigin = new Point(int.MinValue, int.MinValue);
 
         public MainForm(AppSettings settings)
         {
             _settings = settings ?? new AppSettings();
+            _savedSettings = _settings.Clone();
 
             InitializeComponent();
 
@@ -55,11 +70,88 @@ namespace ECController
                 "EC Controller {0}",
                 AssemblyVersionText);
 
-            LoadSettingsIntoUi();
+            string effect = Mica.Apply(Handle, false);
+
+            Logger.Info("窗口特效：" + effect);
+
             LoadConfiguration();
+            LoadSettingsIntoUi();
             InitializeEc();
 
             _tray.SetVisible(_settings.Tray);
+
+            // 布局（含动态行撑高）定下来之后再合成底纹
+            RefreshBackdrop();
+
+            Logger.Info(string.Format(
+                "字体：{0}（首选微软雅黑{1}）；开机启动={2}；登录自动应用={3}（{4} 项）。",
+                FluentTheme.FontFamilyName,
+                FluentTheme.UsingPreferredFont ? "已生效" : "不可用，回退",
+                _settings.AutoStart,
+                _settings.ApplyOnBoot,
+                _settings.BootSelections.Count));
+        }
+
+        /// <summary>
+        /// 重新合成客户区底纹。窗口移动后窗口下面那片壁纸换了，所以也要重做。
+        /// 读不到壁纸时返回 null，一切回退到窗体纯色底。
+        /// </summary>
+        private void RefreshBackdrop()
+        {
+            Bitmap backdrop = Mica.ComposeForControl(this, ClientSize);
+
+            FluentTheme.SetBackdrop(backdrop);
+
+            // StatusStrip 是原生控件，没法可靠地画半透明底；
+            // 底纹本身经过强模糊 + 浅色光罩后几乎均匀，用平均色视觉上等价。
+            statusStrip1.BackColor = backdrop != null
+                ? FluentTheme.BackdropAverage
+                : FluentTheme.WindowBackground;
+
+            _backdropOrigin = Location;
+
+            Invalidate(true);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            Bitmap backdrop = FluentTheme.Backdrop;
+
+            if (backdrop != null)
+            {
+                e.Graphics.DrawImage(
+                    backdrop,
+                    ClientRectangle,
+                    new Rectangle(0, 0, backdrop.Width, backdrop.Height),
+                    GraphicsUnit.Pixel);
+
+                return;
+            }
+
+            base.OnPaintBackground(e);
+        }
+
+        protected override void OnMove(EventArgs e)
+        {
+            base.OnMove(e);
+
+            // 只有真的移动了才重算，避免无谓地反复读壁纸文件
+            int dx = Math.Abs(Location.X - _backdropOrigin.X);
+            int dy = Math.Abs(Location.Y - _backdropOrigin.Y);
+
+            if (dx >= 8 || dy >= 8)
+                RefreshBackdrop();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+
+            // 动态行数变化会改变客户区高度，底纹要跟着重做尺寸
+            Bitmap backdrop = FluentTheme.Backdrop;
+
+            if (backdrop == null || backdrop.Size != ClientSize)
+                RefreshBackdrop();
         }
 
         /// <summary>
@@ -92,28 +184,7 @@ namespace ECController
             }
         }
 
-        /// <summary>把 settings 反映到界面控件上。</summary>
-        private void LoadSettingsIntoUi()
-        {
-            _suppressSettingEvents = true;
-
-            try
-            {
-                chkAutoStart.Checked = _settings.AutoStart;
-                chkApplyBoot.Checked = _settings.ApplyOnBoot;
-                chkTray.Checked = _settings.Tray;
-                numBootDelay.Value = Clamp(
-                    _settings.BootDelaySeconds,
-                    (int)numBootDelay.Minimum,
-                    (int)numBootDelay.Maximum);
-            }
-            finally
-            {
-                _suppressSettingEvents = false;
-            }
-        }
-
-        /// <summary>读取 ec ADDRESS.txt 并填充功能/模式下拉框。</summary>
+        /// <summary>读取 ec ADDRESS.txt 并填充功能/模式下拉框，同时重建启动应用行。</summary>
         private void LoadConfiguration()
         {
             _parse = AddressParser.Load();
@@ -124,6 +195,8 @@ namespace ECController
 
             foreach (EcGroup group in _groups)
                 cmbGroup.Items.Add(group.Name);
+
+            BuildBootGroupRows();
 
             if (cmbGroup.Items.Count > 0)
             {
@@ -142,9 +215,6 @@ namespace ECController
 
                 SetStatus("未找到任何 EC 配置，请检查 Data\\ec ADDRESS.txt");
             }
-
-            // 自动应用模式列表同样依赖 _groups，必须在配置读完后立刻填充
-            RefreshBootModeChoices();
 
             // 格式问题要提示用户，而不是静默跳过
             if (_parse.Warnings.Count > 0)
@@ -491,25 +561,25 @@ namespace ECController
                     if (result.Matches)
                     {
                         row.Cells[3].Value = "✔ 一致";
-                        row.Cells[3].Style.ForeColor = Theme.FluentTheme.Success;
+                        row.Cells[3].Style.ForeColor = FluentTheme.Success;
                     }
                     else
                     {
                         row.Cells[3].Value = "✘ 不一致";
-                        row.Cells[3].Style.ForeColor = Theme.FluentTheme.Error;
+                        row.Cells[3].Style.ForeColor = FluentTheme.Error;
                     }
                 }
                 else if (result.Error != null)
                 {
                     row.Cells[2].Value = "--";
                     row.Cells[3].Value = "✘ 失败";
-                    row.Cells[3].Style.ForeColor = Theme.FluentTheme.Error;
+                    row.Cells[3].Style.ForeColor = FluentTheme.Error;
                 }
                 else
                 {
                     row.Cells[2].Value = "--";
                     row.Cells[3].Value = "未读取";
-                    row.Cells[3].Style.ForeColor = Theme.FluentTheme.TextSecondary;
+                    row.Cells[3].Style.ForeColor = FluentTheme.TextSecondary;
                 }
             }
         }
@@ -521,7 +591,7 @@ namespace ECController
 
             MessageBox.Show(
                 this,
-                "请先选择一个功能和模式。",
+                "请先选择一个功能组和模式。",
                 "提示",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -638,9 +708,10 @@ namespace ECController
             DialogResult confirm = MessageBox.Show(
                 this,
                 "将把软件设置恢复为默认值：\n\n" +
-                "    开机启动     = 关闭\n" +
-                "    登录自动应用 = 关闭\n" +
-                "    最小化到托盘 = 关闭\n\n" +
+                "    开机启动         = 关闭\n" +
+                "    启动后应用       = 关闭\n" +
+                "    各功能组的选择   = 清空\n" +
+                "    最小化到托盘     = 关闭\n\n" +
                 "注意：这不会修改任何 EC 寄存器。确定继续吗？",
                 "恢复软件设置",
                 MessageBoxButtons.YesNo,
@@ -652,60 +723,273 @@ namespace ECController
             _settings.AutoStart = false;
             _settings.ApplyOnBoot = false;
             _settings.Tray = false;
-            _settings.BootGroup = string.Empty;
-            _settings.BootMode = string.Empty;
+            _settings.ClearBootSelections();
             _settings.BootDelaySeconds = 5;
             _settings.WaitTime = 5;
 
-            StartupManager.Disable();
-
             LoadSettingsIntoUi();
-            RefreshBootModeChoices();
-            SaveSettings();
 
             _tray.SetVisible(false);
 
-            SetStatus("软件设置已恢复默认");
+            // 复原动作也走同一条保存链路，用户能看到注册表是否真的同步了
+            SaveAndReport();
 
-            MessageBox.Show(
-                this,
-                "软件设置已恢复为默认值。",
-                "完成",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            SetStatus("软件设置已恢复默认");
+        }
+
+        #endregion
+
+        #region 启动后应用：每个功能组一行
+
+        /// <summary>配置里一个功能组在"启动后应用"区里对应的一行。</summary>
+        private sealed class BootGroupRow
+        {
+            public string GroupName;
+            public FluentCheckBox Check;
+            public FluentComboBox Combo;
+            public EcGroup Group;
+        }
+
+        /// <summary>
+        /// 按 Data\ec ADDRESS.txt 里定义的功能组动态生成行。
+        /// 这样追加 [电池管理] 之类的组不用改代码——配置驱动的原则。
+        /// </summary>
+        private void BuildBootGroupRows()
+        {
+            for (int i = pnlBootGroups.Controls.Count - 1; i >= 0; i--)
+            {
+                Control old = pnlBootGroups.Controls[i];
+                pnlBootGroups.Controls.RemoveAt(i);
+                old.Dispose();
+            }
+
+            _bootRows.Clear();
+
+            foreach (EcGroup group in _groups)
+            {
+                BootGroupRow row = new BootGroupRow();
+                row.Group = group;
+                row.GroupName = group.Name;
+
+                row.Check = new FluentCheckBox();
+                row.Check.Text = group.Name;
+                row.Check.AutoSize = false;
+                row.Check.CheckedChanged += BootRow_Changed;
+
+                row.Combo = new FluentComboBox();
+                row.Combo.DropDownStyle = ComboBoxStyle.DropDownList;
+
+                foreach (EcMode mode in group.Modes)
+                    row.Combo.Items.Add(mode.Name);
+
+                if (row.Combo.Items.Count > 0)
+                    row.Combo.SelectedIndex = 0;
+
+                row.Combo.Enabled = false;
+                row.Combo.SelectedIndexChanged += BootRow_Changed;
+
+                pnlBootGroups.Controls.Add(row.Check);
+                pnlBootGroups.Controls.Add(row.Combo);
+
+                _bootRows.Add(row);
+            }
+
+            LayoutBootGroupRows();
+        }
+
+        private void LayoutBootGroupRows()
+        {
+            int y = 0;
+            int rowHeight = 34;
+
+            foreach (BootGroupRow row in _bootRows)
+            {
+                // 行高按控件实际高度推，避免 DPI 缩放后文字被截
+                rowHeight = Math.Max(row.Check.Height, row.Combo.PreferredHeight) + 8;
+
+                row.Check.Location = new Point(0, y + 2);
+                row.Check.Size = new Size(170, row.Check.Height);
+
+                row.Combo.Location = new Point(174, y);
+                row.Combo.Size = new Size(
+                    Math.Max(120, pnlBootGroups.Width - 174),
+                    row.Combo.PreferredHeight);
+
+                y += rowHeight;
+            }
+
+            pnlBootGroups.Height = Math.Max(rowHeight, y);
+
+            lblBootGroupsHint.Visible = _bootRows.Count > 0;
+
+            if (_bootRows.Count == 0)
+                pnlBootGroups.Height = 0;
+
+            LayoutForm();
+        }
+
+        /// <summary>
+        /// 卡片与下方按钮跟随动态行数一起长高。
+        /// 全部用相对位置算，DPI 缩放后也不会错位。
+        /// </summary>
+        private void LayoutForm()
+        {
+            cardOptions.Height = pnlBootGroups.Bottom + FluentTheme.CardPadding;
+
+            pnlSave.Top = cardOptions.Bottom + FluentTheme.Gap;
+            pnlActions.Top = pnlSave.Bottom + FluentTheme.Gap;
+
+            int bottom = pnlActions.Bottom + FluentTheme.Gap + statusStrip1.Height;
+
+            if (ClientSize.Height != bottom)
+                ClientSize = new Size(ClientSize.Width, bottom);
+        }
+
+        /// <summary>某一行的勾选或模式发生变化：同步到内存设置并标记未保存。</summary>
+        private void BootRow_Changed(object sender, EventArgs e)
+        {
+            if (_suppressSettingEvents)
+                return;
+
+            SyncBootRowsToSettings();
+            UpdateBootRowsEnabled();
+            MarkDirty();
+        }
+
+        /// <summary>把界面上的勾选/模式收集进 _settings.BootSelections。</summary>
+        private void SyncBootRowsToSettings()
+        {
+            _settings.ClearBootSelections();
+
+            foreach (BootGroupRow row in _bootRows)
+            {
+                if (!row.Check.Checked)
+                    continue;
+
+                string mode = row.Combo.SelectedItem == null
+                    ? null
+                    : row.Combo.SelectedItem.ToString();
+
+                if (string.IsNullOrEmpty(mode))
+                    continue;
+
+                _settings.BootSelections.Add(new BootSelection(row.GroupName, mode));
+            }
+        }
+
+        /// <summary>总开关关闭时，所有行都不可交互。</summary>
+        private void UpdateBootRowsEnabled()
+        {
+            bool on = chkApplyBoot.Checked;
+
+            foreach (BootGroupRow row in _bootRows)
+            {
+                row.Check.Enabled = on;
+                row.Combo.Enabled = on && row.Check.Checked;
+            }
+
+            lblBootGroupsHint.Visible = _bootRows.Count > 0;
+
+            if (on && CountCheckedRows() == 0 && _bootRows.Count > 0)
+                lblBootGroupsHint.Text = "已启用，但没有勾选任何功能组 —— 保存后登录时不会套用任何配置。";
+            else
+                lblBootGroupsHint.Text = "每个功能组可分别选择要套用的模式：";
+        }
+
+        private int CountCheckedRows()
+        {
+            int n = 0;
+
+            foreach (BootGroupRow row in _bootRows)
+            {
+                if (row.Check.Checked)
+                    n++;
+            }
+
+            return n;
         }
 
         #endregion
 
         #region 设置项
 
+        /// <summary>把 _settings 反映到界面控件上。</summary>
+        private void LoadSettingsIntoUi()
+        {
+            _suppressSettingEvents = true;
+
+            try
+            {
+                chkAutoStart.Checked = _settings.AutoStart;
+                chkApplyBoot.Checked = _settings.ApplyOnBoot;
+                chkTray.Checked = _settings.Tray;
+                numBootDelay.Value = Clamp(
+                    _settings.BootDelaySeconds,
+                    (int)numBootDelay.Minimum,
+                    (int)numBootDelay.Maximum);
+
+                foreach (BootGroupRow row in _bootRows)
+                {
+                    string mode = _settings.GetBootMode(row.GroupName);
+                    bool selected = !string.IsNullOrEmpty(mode) && row.Combo.Items.Count > 0;
+
+                    if (selected)
+                    {
+                        int index = row.Combo.Items.IndexOf(mode);
+
+                        if (index < 0)
+                        {
+                            // 配置里记的模式已从 ec ADDRESS.txt 删掉：保留组选中，
+                            // 但选回落第一个模式，并在状态栏说明。
+                            Logger.Warn(string.Format(
+                                "配置里记录的 [{0}] / {1} 已不存在，已改为第一个可用模式。",
+                                row.GroupName,
+                                mode));
+
+                            index = 0;
+                        }
+
+                        row.Combo.SelectedIndex = index;
+                    }
+
+                    row.Check.Checked = selected;
+                }
+            }
+            finally
+            {
+                _suppressSettingEvents = false;
+            }
+
+            // 勾了总开关但一个组都没选（比如旧配置迁移过来只剩空列表）：
+            // 默认把第一个功能组选上，避免"看起来开了其实什么都没做"。
+            if (_settings.ApplyOnBoot && CountCheckedRows() == 0 && _bootRows.Count > 0)
+            {
+                _suppressSettingEvents = true;
+
+                try
+                {
+                    _bootRows[0].Check.Checked = true;
+                }
+                finally
+                {
+                    _suppressSettingEvents = false;
+                }
+
+                SyncBootRowsToSettings();
+            }
+
+            UpdateBootRowsEnabled();
+            UpdateSaveState();
+        }
+
         private void chkAutoStart_CheckedChanged(object sender, EventArgs e)
         {
             if (_suppressSettingEvents)
                 return;
 
-            bool enabled = chkAutoStart.Checked;
+            _settings.AutoStart = chkAutoStart.Checked;
 
-            if (!StartupManager.Apply(enabled))
-            {
-                MessageBox.Show(
-                    this,
-                    "写入开机启动项失败，详见日志。",
-                    "设置失败",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-
-                // 回滚勾选状态以反映真实情况
-                _suppressSettingEvents = true;
-                chkAutoStart.Checked = StartupManager.IsEnabled();
-                _suppressSettingEvents = false;
-
-                return;
-            }
-
-            _settings.AutoStart = enabled;
-            SaveSettings();
-            SetStatus(enabled ? "已启用开机启动" : "已关闭开机启动");
+            MarkDirty();
         }
 
         private void chkApplyBoot_CheckedChanged(object sender, EventArgs e)
@@ -715,12 +999,29 @@ namespace ECController
 
             _settings.ApplyOnBoot = chkApplyBoot.Checked;
 
-            RefreshBootModeChoices();
-            SaveSettings();
+            bool hasCheckedRow = CountCheckedRows() > 0;
 
-            SetStatus(chkApplyBoot.Checked
-                ? "已启用登录自动应用"
-                : "已关闭登录自动应用");
+            _suppressSettingEvents = true;
+
+            try
+            {
+                if (_settings.ApplyOnBoot && !hasCheckedRow && _bootRows.Count > 0)
+                    _bootRows[0].Check.Checked = true;
+
+                if (!_settings.ApplyOnBoot)
+                {
+                    foreach (BootGroupRow row in _bootRows)
+                        row.Check.Checked = false;
+                }
+            }
+            finally
+            {
+                _suppressSettingEvents = false;
+            }
+
+            SyncBootRowsToSettings();
+            UpdateBootRowsEnabled();
+            MarkDirty();
         }
 
         private void chkTray_CheckedChanged(object sender, EventArgs e)
@@ -731,28 +1032,7 @@ namespace ECController
             _settings.Tray = chkTray.Checked;
             _tray.SetVisible(_settings.Tray);
 
-            SaveSettings();
-
-            SetStatus(chkTray.Checked
-                ? "已启用最小化到托盘"
-                : "已关闭最小化到托盘");
-        }
-
-        private void cmbBootMode_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_suppressSettingEvents)
-                return;
-
-            string groupName;
-            EcMode mode = ResolveBootSelection(out groupName);
-
-            if (mode == null)
-                return;
-
-            _settings.BootGroup = groupName;
-            _settings.BootMode = mode.Name;
-
-            SaveSettings();
+            MarkDirty();
         }
 
         private void numBootDelay_ValueChanged(object sender, EventArgs e)
@@ -761,118 +1041,182 @@ namespace ECController
                 return;
 
             _settings.BootDelaySeconds = (int)numBootDelay.Value;
-            SaveSettings();
+
+            MarkDirty();
+        }
+
+        /// <summary>界面上的改动还没写盘时用一个显眼的标记提示。</summary>
+        private void MarkDirty()
+        {
+            UpdateSaveState();
+        }
+
+        private bool IsDirty
+        {
+            get { return !_settings.SameAs(_savedSettings); }
+        }
+
+        private void UpdateSaveState()
+        {
+            if (IsDirty)
+            {
+                lblSaveState.ForeColor = FluentTheme.Warning;
+
+                // 明确折行：这行字不短，靠 Label 自动换行会随 DPI/字体变化而截断
+                lblSaveState.Text =
+                    "有未保存的更改 —— 请点「保存配置」\n" +
+                    "将写入 config.json 并同步开机启动项";
+            }
+            else
+            {
+                lblSaveState.ForeColor = FluentTheme.TextSecondary;
+                lblSaveState.Text = "设置与 config.json 一致";
+            }
         }
 
         /// <summary>
-        /// 重建"自动应用模式"下拉框。列表是"功能组 / 模式"的扁平组合，
-        /// 因为自动应用需要同时知道组和模式。
+        /// 「保存配置」：写 config.json -> 同步 HKCU Run -> 回读校验，
+        /// 三项结果分别反馈，不做"看起来成功了"的模糊提示。
         /// </summary>
-        private void RefreshBootModeChoices()
+        private void btnSaveConfig_Click(object sender, EventArgs e)
         {
-            _suppressSettingEvents = true;
+            SyncBootRowsToSettings();
+            SaveAndReport();
+        }
+
+        private void SaveAndReport()
+        {
+            Cursor previous = Cursor;
+            Cursor = Cursors.WaitCursor;
 
             try
             {
-                cmbBootMode.Items.Clear();
+                // 1) 写 config.json
+                bool configOk = SettingsManager.Save(_settings);
 
-                foreach (EcGroup group in _groups)
-                {
-                    foreach (EcMode mode in group.Modes)
-                    {
-                        cmbBootMode.Items.Add(
-                            new BootModeEntry(group.Name, mode.Name));
-                    }
-                }
+                // 2) 同步开机启动项，并回读校验
+                bool startupOk = StartupManager.Apply(_settings.AutoStart);
+                string actual = StartupManager.ReadCommand();
 
-                cmbBootMode.Enabled = chkApplyBoot.Checked &&
-                    cmbBootMode.Items.Count > 0;
+                bool allOk = IsSaveReportClean(configOk, startupOk, _settings, actual);
+                List<string> lines = BuildSaveReport(_settings, configOk, startupOk, actual);
 
-                // 禁用状态下 WinForms 会把下拉框画成灰蒙蒙一片，
-                // 看起来像"空的"。这里同步给出提示文字，让用户明白为什么不能选。
-                if (!chkApplyBoot.Checked)
-                {
-                    cmbBootMode.Items.Insert(0, DisabledBootModeHint);
+                if (allOk)
+                    _savedSettings = _settings.Clone();
 
-                    // 必须真的选中占位项，否则禁用状态下框里什么都不显示
-                    cmbBootMode.SelectedIndex = 0;
-                }
+                UpdateSaveState();
 
-                // 选中已保存的那一项
-                int index = FindBootEntryIndex();
+                SetStatus(allOk ? "配置已保存" : "配置保存未完全成功");
 
-                if (index >= 0)
-                {
-                    cmbBootMode.SelectedIndex = index;
-                }
-                else if (chkApplyBoot.Checked && cmbBootMode.Items.Count > 0)
-                {
-                    // 跳过占位提示项（勾选时本来就不该有占位项，这里只做保护）
-                    cmbBootMode.SelectedIndex =
-                        cmbBootMode.Items[0] is BootModeEntry ? 0 : 1;
-                }
+                string title = allOk ? "配置已保存" : "配置保存未完全成功";
+
+                MessageBox.Show(
+                    this,
+                    string.Join("\n", lines.ToArray()),
+                    title,
+                    MessageBoxButtons.OK,
+                    allOk ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             finally
             {
-                _suppressSettingEvents = false;
+                Cursor = previous;
             }
         }
 
-        /// <summary>未启用自动应用时下拉框里的占位文字。</summary>
-        private const string DisabledBootModeHint = "（先勾选\"登录自动应用\"）";
-
-        private int FindBootEntryIndex()
+        /// <summary>
+        /// 组装「保存配置」的反馈文本。
+        ///
+        /// 刻意做成静态纯函数：不碰界面、不碰注册表、不弹窗，
+        /// 这样"保存后的反馈"本身可以被自测覆盖（三种状态：写盘、开机启动项、登录后行为），
+        /// 而不是只能靠人眼看一遍。
+        /// </summary>
+        internal static List<string> BuildSaveReport(
+            AppSettings settings,
+            bool configOk,
+            bool startupOk,
+            string actualCommand)
         {
-            for (int i = 0; i < cmbBootMode.Items.Count; i++)
+            List<string> lines = new List<string>();
+
+            if (configOk)
             {
-                BootModeEntry entry = cmbBootMode.Items[i] as BootModeEntry;
-
-                // 占位提示项不是 BootModeEntry，自然被跳过
-                if (entry == null)
-                    continue;
-
-                if (entry.GroupName == _settings.BootGroup &&
-                    entry.ModeName == _settings.BootMode)
-                {
-                    return i;
-                }
+                lines.Add("config.json　写入成功");
+                lines.Add("　　" + SettingsManager.SettingsPath);
             }
-
-            return -1;
-        }
-
-        private EcMode ResolveBootSelection(out string groupName)
-        {
-            groupName = null;
-
-            BootModeEntry entry = cmbBootMode.SelectedItem as BootModeEntry;
-
-            // 选中的是占位提示项时视为未选择
-            if (entry == null)
-                return null;
-
-            groupName = entry.GroupName;
-
-            foreach (EcGroup group in _groups)
+            else
             {
-                if (group.Name != entry.GroupName)
-                    continue;
-
-                foreach (EcMode mode in group.Modes)
-                {
-                    if (mode.Name == entry.ModeName)
-                        return mode;
-                }
+                lines.Add("config.json　写入失败，详见 Logs\\ 下的日志");
             }
 
-            return null;
+            if (!startupOk)
+            {
+                lines.Add("开机启动项　写入失败，详见 Logs\\ 下的日志");
+            }
+            else if (settings.AutoStart)
+            {
+                lines.Add("开机启动项　已写入 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+                lines.Add("　　ECController = " + (actualCommand ?? "(读回为空)"));
+                lines.Add(StartupCommandMatches(actualCommand)
+                    ? "　　回读校验：与预期一致"
+                    : "　　回读校验：与预期不一致！");
+            }
+            else
+            {
+                lines.Add("开机启动项　已移除（注册表里已无 ECController 项）");
+            }
+
+            if (!settings.ApplyOnBoot)
+            {
+                lines.Add("登录后　不自动应用任何配置");
+            }
+            else if (settings.BootSelections.Count == 0)
+            {
+                lines.Add("登录后　已启用自动应用，但没有勾选任何功能组 —— 实际不会写入 EC");
+            }
+            else
+            {
+                StringBuilder sb = new StringBuilder();
+
+                foreach (BootSelection sel in settings.BootSelections)
+                {
+                    if (sb.Length > 0)
+                        sb.Append("、");
+
+                    sb.Append(sel.ToString());
+                }
+
+                lines.Add(string.Format(
+                    "登录后　{0} 秒后应用：{1}",
+                    settings.BootDelaySeconds,
+                    sb.ToString()));
+            }
+
+            return lines;
         }
 
-        /// <summary>保存设置到 config.json。失败提示一次但不打断操作。</summary>
-        private void SaveSettings()
+        /// <summary>三步（写盘 / 注册表 / 回读）是否全部成功。与 BuildSaveReport 配对。</summary>
+        internal static bool IsSaveReportClean(
+            bool configOk,
+            bool startupOk,
+            AppSettings settings,
+            string actualCommand)
         {
-            if (!SettingsManager.Save(_settings))
-                SetStatus("设置保存失败，详见日志");
+            if (!configOk || !startupOk)
+                return false;
+
+            // 关闭开机启动时不看回读（Disable 后本来就该是空）
+            if (!settings.AutoStart)
+                return true;
+
+            return StartupCommandMatches(actualCommand);
+        }
+
+        private static bool StartupCommandMatches(string actualCommand)
+        {
+            return string.Equals(
+                actualCommand,
+                StartupManager.ExpectedCommand,
+                StringComparison.Ordinal);
         }
 
         #endregion
@@ -898,6 +1242,36 @@ namespace ECController
                 return;
             }
 
+            // 用户直接关窗口时别把改动悄悄丢了
+            if (!_reallyExit && e.CloseReason == CloseReason.UserClosing && IsDirty)
+            {
+                DialogResult answer = MessageBox.Show(
+                    this,
+                    "设置还有未保存的更改。\n\n要不要先保存再退出？",
+                    "未保存的更改",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (answer == DialogResult.Cancel)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                if (answer == DialogResult.Yes)
+                {
+                    SyncBootRowsToSettings();
+                    SaveAndReport();
+
+                    // 保存链路整体失败时不退出，让用户看到问题
+                    if (IsDirty)
+                    {
+                        e.Cancel = true;
+                        return;
+                    }
+                }
+            }
+
             base.OnFormClosing(e);
         }
 
@@ -905,6 +1279,7 @@ namespace ECController
         {
             _tray.Dispose();
             ReleaseEc();
+            FluentTheme.SetBackdrop(null);
 
             Logger.Info("===== EC Controller 退出 =====");
 
@@ -937,6 +1312,8 @@ namespace ECController
 
             Activate();
             BringToFront();
+
+            RefreshBackdrop();
         }
 
         private void OnTrayReapply(object sender, EventArgs e)
@@ -954,27 +1331,5 @@ namespace ECController
         }
 
         #endregion
-    }
-
-    /// <summary>
-    /// "自动应用模式"下拉框的条目：同时携带功能组与模式名，
-    /// 因为 EC 配置里模式名可能在不同组下重名。
-    /// </summary>
-    internal sealed class BootModeEntry
-    {
-        public string GroupName { get; private set; }
-
-        public string ModeName { get; private set; }
-
-        public BootModeEntry(string groupName, string modeName)
-        {
-            GroupName = groupName;
-            ModeName = modeName;
-        }
-
-        public override string ToString()
-        {
-            return GroupName + " / " + ModeName;
-        }
     }
 }

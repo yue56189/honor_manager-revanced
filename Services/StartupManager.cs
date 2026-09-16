@@ -41,7 +41,7 @@ namespace ECController.Services
         /// <summary>启用开机启动。</summary>
         public static bool Enable()
         {
-            return WriteStartupValue("\"" + ExecutablePath + "\" " + SilentArgument);
+            return WriteStartupValue(ExpectedCommand);
         }
 
         /// <summary>关闭开机启动。已经不存在时也算成功。</summary>
@@ -79,24 +79,43 @@ namespace ECController.Services
         /// <summary>查询注册表中当前是否已存在本程序的开机启动项。</summary>
         public static bool IsEnabled()
         {
+            return !string.IsNullOrEmpty(ReadCommand());
+        }
+
+        /// <summary>
+        /// 读取注册表里实际记录的命令行；没有该项时返回 null。
+        /// 保存设置后用它回读校验——"写成功"和"注册表里真的是这个值"是两件事。
+        /// </summary>
+        public static string ReadCommand()
+        {
             try
             {
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false))
                 {
                     if (key == null)
-                        return false;
+                        return null;
 
                     object value = key.GetValue(ValueName);
 
-                    return value != null &&
-                        !string.IsNullOrEmpty(value.ToString());
+                    if (value == null)
+                        return null;
+
+                    string text = value.ToString();
+
+                    return string.IsNullOrEmpty(text) ? null : text;
                 }
             }
             catch (Exception ex)
             {
                 Logger.Error("查询开机启动项失败。", ex);
-                return false;
+                return null;
             }
+        }
+
+        /// <summary>期望写入的命令行（供界面回读比对）。</summary>
+        public static string ExpectedCommand
+        {
+            get { return "\"" + ExecutablePath + "\" " + SilentArgument; }
         }
 
         private static bool WriteStartupValue(string command)

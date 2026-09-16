@@ -75,11 +75,40 @@ namespace ECController.Theme
         /// <summary>用父控件的底色铺满控件区域（父级为空的极端情况回退到窗体底色）。</summary>
         public static void Fill(Control c, Graphics g)
         {
+            // 父级是窗体时，窗体底不是纯色而是 Mica 风格底纹位图，
+            // 必须把对应位置那片像素贴过来，否则圆角外侧会出现纯色补丁。
+            if (TryFillFromBackdrop(c, g))
+                return;
+
             Color outer = c.Parent != null ? c.Parent.BackColor : FluentTheme.WindowBackground;
             if (outer.A == 0) outer = FluentTheme.WindowBackground;
 
             using (SolidBrush b = new SolidBrush(outer))
                 g.FillRectangle(b, c.ClientRectangle);
+        }
+
+        /// <summary>
+        /// 直接子控件位于窗体上时，从窗体底纹位图里取它那一块贴过来。
+        /// 子控件坐标就是窗体客户区坐标，所以不需要再做坐标换算。
+        /// </summary>
+        private static bool TryFillFromBackdrop(Control c, Graphics g)
+        {
+            Bitmap backdrop = FluentTheme.Backdrop;
+
+            if (backdrop == null || c.Parent == null || !(c.Parent is Form))
+                return false;
+
+            Rectangle src = new Rectangle(c.Left, c.Top, c.Width, c.Height);
+            Rectangle inter = Rectangle.Intersect(src, new Rectangle(0, 0, backdrop.Width, backdrop.Height));
+
+            if (inter.IsEmpty)
+                return false;
+
+            Rectangle dest = new Rectangle(inter.X - src.X, inter.Y - src.Y, inter.Width, inter.Height);
+
+            g.DrawImage(backdrop, dest, inter, GraphicsUnit.Pixel);
+
+            return true;
         }
     }
 

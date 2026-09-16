@@ -22,9 +22,9 @@
     <Product>EC Controller</Product>
     <Description>通过 WinRing0 驱动读写笔记本 EC 寄存器，管理性能模式与电源策略。</Description>
     <Copyright>Copyright © 2026</Copyright>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <Version>1.0.1</Version>
+    <FileVersion>1.0.1.0</FileVersion>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>x64</PlatformTarget>
@@ -68,6 +68,7 @@
     <Compile Include="Config\SettingsManager.cs" />
     <Compile Include="Driver\DriverLoader.cs" />
     <Compile Include="Driver\EcAccess.cs" />
+    <Compile Include="Models\BootSelection.cs" />
     <Compile Include="Models\EcGroup.cs" />
     <Compile Include="Models\EcItem.cs" />
     <Compile Include="Models\EcMode.cs" />
@@ -76,6 +77,7 @@
     <Compile Include="Services\StartupManager.cs" />
     <Compile Include="Services\TrayManager.cs" />
     <Compile Include="Theme\FluentTheme.cs" />
+    <Compile Include="Theme\Mica.cs" />
     <Compile Include="Theme\FluentControls.cs" />
     <Compile Include="Theme\FluentDataGridView.cs" />
     <Compile Include="MainForm.cs">

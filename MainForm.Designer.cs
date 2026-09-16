@@ -28,6 +28,8 @@
         /// </summary>
         private void InitializeComponent()
         {
+            this.lblTitle = new System.Windows.Forms.Label();
+            this.lblDivider = new System.Windows.Forms.Label();
             this.lblFunction = new System.Windows.Forms.Label();
             this.cmbGroup = new ECController.Theme.FluentComboBox();
             this.lblmodes = new System.Windows.Forms.Label();
@@ -41,25 +43,28 @@
             this.btnRead = new ECController.Theme.FluentButton();
             this.cardOptions = new ECController.Theme.FluentCard();
             this.chkAutoStart = new ECController.Theme.FluentCheckBox();
+            this.chkTray = new ECController.Theme.FluentCheckBox();
             this.chkApplyBoot = new ECController.Theme.FluentCheckBox();
-            this.lblBootMode = new System.Windows.Forms.Label();
-            this.cmbBootMode = new ECController.Theme.FluentComboBox();
             this.lblBootDelay = new System.Windows.Forms.Label();
             this.numBootDelay = new ECController.Theme.FluentNumericUpDown();
             this.lblDelayUnit = new System.Windows.Forms.Label();
-            this.chkTray = new ECController.Theme.FluentCheckBox();
+            this.lblBootGroupsHint = new System.Windows.Forms.Label();
+            this.pnlBootGroups = new System.Windows.Forms.Panel();
+            this.pnlSave = new System.Windows.Forms.Panel();
+            this.btnSaveConfig = new ECController.Theme.FluentButton();
+            this.lblSaveState = new System.Windows.Forms.Label();
             this.pnlActions = new System.Windows.Forms.Panel();
             this.btnApply = new ECController.Theme.FluentButton();
             this.btnRestore = new ECController.Theme.FluentButton();
             this.btnExit = new ECController.Theme.FluentButton();
-            this.lblTitle = new System.Windows.Forms.Label();
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.toolStripStatusLabel1 = new System.Windows.Forms.ToolStripStatusLabel();
-            this.lblDivider = new System.Windows.Forms.Label();
             this.cardPreview.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvPreview)).BeginInit();
             this.cardOptions.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numBootDelay)).BeginInit();
+            this.pnlBootGroups.SuspendLayout();
+            this.pnlSave.SuspendLayout();
             this.pnlActions.SuspendLayout();
             this.statusStrip1.SuspendLayout();
             this.SuspendLayout();
@@ -94,7 +99,7 @@
             this.lblFunction.Name = "lblFunction";
             this.lblFunction.Size = new System.Drawing.Size(38, 17);
             this.lblFunction.TabIndex = 2;
-            this.lblFunction.Text = "功能";
+            this.lblFunction.Text = "功能组";
             //
             // cmbGroup
             //
@@ -201,64 +206,50 @@
             // cardOptions
             //
             this.cardOptions.Controls.Add(this.chkAutoStart);
+            this.cardOptions.Controls.Add(this.chkTray);
             this.cardOptions.Controls.Add(this.chkApplyBoot);
-            this.cardOptions.Controls.Add(this.lblBootMode);
-            this.cardOptions.Controls.Add(this.cmbBootMode);
             this.cardOptions.Controls.Add(this.lblBootDelay);
             this.cardOptions.Controls.Add(this.numBootDelay);
             this.cardOptions.Controls.Add(this.lblDelayUnit);
-            this.cardOptions.Controls.Add(this.chkTray);
+            this.cardOptions.Controls.Add(this.lblBootGroupsHint);
+            this.cardOptions.Controls.Add(this.pnlBootGroups);
             this.cardOptions.Location = new System.Drawing.Point(20, 446);
             this.cardOptions.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.cardOptions.Name = "cardOptions";
             this.cardOptions.Padding = new System.Windows.Forms.Padding(16, 46, 16, 16);
-            this.cardOptions.Size = new System.Drawing.Size(508, 154);
+            this.cardOptions.Size = new System.Drawing.Size(508, 196);
             this.cardOptions.TabIndex = 8;
             this.cardOptions.Title = "启动与运行";
             //
             // chkAutoStart
             //
-            this.chkAutoStart.Location = new System.Drawing.Point(20, 50);
+            this.chkAutoStart.Location = new System.Drawing.Point(16, 48);
             this.chkAutoStart.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.chkAutoStart.Name = "chkAutoStart";
-            this.chkAutoStart.Size = new System.Drawing.Size(128, 24);
+            this.chkAutoStart.Size = new System.Drawing.Size(116, 24);
             this.chkAutoStart.TabIndex = 0;
             this.chkAutoStart.Text = "开机启动";
             this.chkAutoStart.CheckedChanged += new System.EventHandler(this.chkAutoStart_CheckedChanged);
             //
+            // chkTray
+            //
+            this.chkTray.Location = new System.Drawing.Point(148, 48);
+            this.chkTray.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
+            this.chkTray.Name = "chkTray";
+            this.chkTray.Size = new System.Drawing.Size(150, 24);
+            this.chkTray.TabIndex = 1;
+            this.chkTray.Text = "最小化到托盘";
+            this.chkTray.CheckedChanged += new System.EventHandler(this.chkTray_CheckedChanged);
+            //
             // chkApplyBoot
             //
-            this.chkApplyBoot.Location = new System.Drawing.Point(20, 82);
+            this.chkApplyBoot.Location = new System.Drawing.Point(16, 78);
             this.chkApplyBoot.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.chkApplyBoot.Name = "chkApplyBoot";
-            this.chkApplyBoot.Size = new System.Drawing.Size(128, 24);
-            this.chkApplyBoot.TabIndex = 1;
-            this.chkApplyBoot.Text = "登录自动应用";
+            this.chkApplyBoot.Size = new System.Drawing.Size(230, 24);
+            this.chkApplyBoot.TabIndex = 2;
+            this.chkApplyBoot.Text = "启动后应用以下配置";
             this.chkApplyBoot.CheckedChanged += new System.EventHandler(this.chkApplyBoot_CheckedChanged);
-            //
-            // lblBootMode
-            //
-            this.lblBootMode.AutoSize = true;
-            this.lblBootMode.BackColor = System.Drawing.Color.Transparent;
-            this.lblBootMode.Font = ECController.Theme.FluentTheme.CaptionFont;
-            this.lblBootMode.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
-            this.lblBootMode.Location = new System.Drawing.Point(160, 53);
-            this.lblBootMode.Name = "lblBootMode";
-            this.lblBootMode.Size = new System.Drawing.Size(68, 17);
-            this.lblBootMode.TabIndex = 2;
-            this.lblBootMode.Text = "自动应用";
-            //
-            // cmbBootMode
-            //
-            this.cmbBootMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbBootMode.Font = ECController.Theme.FluentTheme.BodyFont;
-            this.cmbBootMode.FormattingEnabled = true;
-            this.cmbBootMode.Location = new System.Drawing.Point(236, 49);
-            this.cmbBootMode.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
-            this.cmbBootMode.Name = "cmbBootMode";
-            this.cmbBootMode.Size = new System.Drawing.Size(256, 29);
-            this.cmbBootMode.TabIndex = 3;
-            this.cmbBootMode.SelectedIndexChanged += new System.EventHandler(this.cmbBootMode_SelectedIndexChanged);
             //
             // lblBootDelay
             //
@@ -266,21 +257,21 @@
             this.lblBootDelay.BackColor = System.Drawing.Color.Transparent;
             this.lblBootDelay.Font = ECController.Theme.FluentTheme.CaptionFont;
             this.lblBootDelay.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
-            this.lblBootDelay.Location = new System.Drawing.Point(160, 86);
+            this.lblBootDelay.Location = new System.Drawing.Point(262, 82);
             this.lblBootDelay.Name = "lblBootDelay";
-            this.lblBootDelay.Size = new System.Drawing.Size(68, 17);
-            this.lblBootDelay.TabIndex = 4;
-            this.lblBootDelay.Text = "启动延迟";
+            this.lblBootDelay.Size = new System.Drawing.Size(38, 17);
+            this.lblBootDelay.TabIndex = 3;
+            this.lblBootDelay.Text = "延迟";
             //
             // numBootDelay
             //
             this.numBootDelay.Font = ECController.Theme.FluentTheme.BodyFont;
-            this.numBootDelay.Location = new System.Drawing.Point(236, 82);
+            this.numBootDelay.Location = new System.Drawing.Point(302, 78);
             this.numBootDelay.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.numBootDelay.Maximum = new decimal(new int[] { 300, 0, 0, 0 });
             this.numBootDelay.Name = "numBootDelay";
             this.numBootDelay.Size = new System.Drawing.Size(60, 28);
-            this.numBootDelay.TabIndex = 5;
+            this.numBootDelay.TabIndex = 4;
             this.numBootDelay.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
             this.numBootDelay.Value = new decimal(new int[] { 5, 0, 0, 0 });
             this.numBootDelay.ValueChanged += new System.EventHandler(this.numBootDelay_ValueChanged);
@@ -291,21 +282,63 @@
             this.lblDelayUnit.BackColor = System.Drawing.Color.Transparent;
             this.lblDelayUnit.Font = ECController.Theme.FluentTheme.CaptionFont;
             this.lblDelayUnit.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
-            this.lblDelayUnit.Location = new System.Drawing.Point(304, 86);
+            this.lblDelayUnit.Location = new System.Drawing.Point(370, 82);
             this.lblDelayUnit.Name = "lblDelayUnit";
-            this.lblDelayUnit.Size = new System.Drawing.Size(98, 17);
-            this.lblDelayUnit.TabIndex = 6;
+            this.lblDelayUnit.Size = new System.Drawing.Size(53, 17);
+            this.lblDelayUnit.TabIndex = 5;
             this.lblDelayUnit.Text = "秒后再应用";
             //
-            // chkTray
+            // lblBootGroupsHint
             //
-            this.chkTray.Location = new System.Drawing.Point(20, 114);
-            this.chkTray.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
-            this.chkTray.Name = "chkTray";
-            this.chkTray.Size = new System.Drawing.Size(150, 24);
-            this.chkTray.TabIndex = 7;
-            this.chkTray.Text = "最小化到托盘";
-            this.chkTray.CheckedChanged += new System.EventHandler(this.chkTray_CheckedChanged);
+            this.lblBootGroupsHint.AutoSize = true;
+            this.lblBootGroupsHint.BackColor = System.Drawing.Color.Transparent;
+            this.lblBootGroupsHint.Font = ECController.Theme.FluentTheme.CaptionFont;
+            this.lblBootGroupsHint.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
+            this.lblBootGroupsHint.Location = new System.Drawing.Point(16, 112);
+            this.lblBootGroupsHint.Name = "lblBootGroupsHint";
+            this.lblBootGroupsHint.Size = new System.Drawing.Size(200, 17);
+            this.lblBootGroupsHint.TabIndex = 6;
+            this.lblBootGroupsHint.Text = "每个功能组可分别选择要套用的模式：";
+            //
+            // pnlBootGroups
+            //
+            this.pnlBootGroups.BackColor = System.Drawing.Color.Transparent;
+            this.pnlBootGroups.Location = new System.Drawing.Point(16, 134);
+            this.pnlBootGroups.Name = "pnlBootGroups";
+            this.pnlBootGroups.Size = new System.Drawing.Size(476, 46);
+            this.pnlBootGroups.TabIndex = 7;
+            //
+            // pnlSave
+            //
+            this.pnlSave.BackColor = System.Drawing.Color.Transparent;
+            this.pnlSave.Controls.Add(this.btnSaveConfig);
+            this.pnlSave.Controls.Add(this.lblSaveState);
+            this.pnlSave.Location = new System.Drawing.Point(20, 654);
+            this.pnlSave.Name = "pnlSave";
+            this.pnlSave.Size = new System.Drawing.Size(508, 38);
+            this.pnlSave.TabIndex = 9;
+            //
+            // btnSaveConfig
+            //
+            this.btnSaveConfig.Accent = true;
+            this.btnSaveConfig.Location = new System.Drawing.Point(0, 1);
+            this.btnSaveConfig.Name = "btnSaveConfig";
+            this.btnSaveConfig.Size = new System.Drawing.Size(132, 34);
+            this.btnSaveConfig.TabIndex = 0;
+            this.btnSaveConfig.Text = "保存配置";
+            this.btnSaveConfig.Click += new System.EventHandler(this.btnSaveConfig_Click);
+            //
+            // lblSaveState
+            //
+            this.lblSaveState.AutoSize = false;
+            this.lblSaveState.BackColor = System.Drawing.Color.Transparent;
+            this.lblSaveState.Font = ECController.Theme.FluentTheme.CaptionFont;
+            this.lblSaveState.ForeColor = ECController.Theme.FluentTheme.TextSecondary;
+            this.lblSaveState.Location = new System.Drawing.Point(144, 1);
+            this.lblSaveState.Name = "lblSaveState";
+            this.lblSaveState.Size = new System.Drawing.Size(364, 36);
+            this.lblSaveState.TabIndex = 1;
+            this.lblSaveState.Text = "";
             //
             // pnlActions
             //
@@ -313,16 +346,16 @@
             this.pnlActions.Controls.Add(this.btnApply);
             this.pnlActions.Controls.Add(this.btnRestore);
             this.pnlActions.Controls.Add(this.btnExit);
-            this.pnlActions.Location = new System.Drawing.Point(20, 612);
+            this.pnlActions.Location = new System.Drawing.Point(20, 702);
             this.pnlActions.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.pnlActions.Name = "pnlActions";
             this.pnlActions.Size = new System.Drawing.Size(508, 40);
-            this.pnlActions.TabIndex = 9;
+            this.pnlActions.TabIndex = 10;
             //
             // btnApply
             //
             this.btnApply.Accent = true;
-            this.btnApply.Location = new System.Drawing.Point(184, 3);
+            this.btnApply.Location = new System.Drawing.Point(84, 3);
             this.btnApply.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.btnApply.Name = "btnApply";
             this.btnApply.Size = new System.Drawing.Size(100, 34);
@@ -333,10 +366,10 @@
             // btnRestore
             //
             this.btnRestore.Accent = false;
-            this.btnRestore.Location = new System.Drawing.Point(292, 3);
+            this.btnRestore.Location = new System.Drawing.Point(192, 3);
             this.btnRestore.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.btnRestore.Name = "btnRestore";
-            this.btnRestore.Size = new System.Drawing.Size(100, 34);
+            this.btnRestore.Size = new System.Drawing.Size(116, 34);
             this.btnRestore.TabIndex = 1;
             this.btnRestore.Text = "恢复默认";
             this.btnRestore.Click += new System.EventHandler(this.btnRestore_Click);
@@ -344,7 +377,7 @@
             // btnExit
             //
             this.btnExit.Accent = false;
-            this.btnExit.Location = new System.Drawing.Point(400, 3);
+            this.btnExit.Location = new System.Drawing.Point(316, 3);
             this.btnExit.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.btnExit.Name = "btnExit";
             this.btnExit.Size = new System.Drawing.Size(100, 34);
@@ -359,12 +392,12 @@
             this.statusStrip1.ImageScalingSize = new System.Drawing.Size(20, 20);
             this.statusStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.toolStripStatusLabel1});
-            this.statusStrip1.Location = new System.Drawing.Point(0, 688);
+            this.statusStrip1.Location = new System.Drawing.Point(0, 760);
             this.statusStrip1.Name = "statusStrip1";
             this.statusStrip1.Padding = new System.Windows.Forms.Padding(20, 0, 20, 0);
             this.statusStrip1.SizingGrip = false;
             this.statusStrip1.Size = new System.Drawing.Size(548, 26);
-            this.statusStrip1.TabIndex = 10;
+            this.statusStrip1.TabIndex = 11;
             //
             // toolStripStatusLabel1
             //
@@ -378,7 +411,7 @@
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = ECController.Theme.FluentTheme.WindowBackground;
-            this.ClientSize = new System.Drawing.Size(548, 684);
+            this.ClientSize = new System.Drawing.Size(548, 756);
             this.Controls.Add(this.lblTitle);
             this.Controls.Add(this.lblDivider);
             this.Controls.Add(this.lblFunction);
@@ -388,6 +421,7 @@
             this.Controls.Add(this.cardPreview);
             this.Controls.Add(this.btnRead);
             this.Controls.Add(this.cardOptions);
+            this.Controls.Add(this.pnlSave);
             this.Controls.Add(this.pnlActions);
             this.Controls.Add(this.statusStrip1);
             this.DoubleBuffered = true;
@@ -405,6 +439,8 @@
             this.cardOptions.ResumeLayout(false);
             this.cardOptions.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numBootDelay)).EndInit();
+            this.pnlBootGroups.ResumeLayout(false);
+            this.pnlSave.ResumeLayout(false);
             this.pnlActions.ResumeLayout(false);
             this.statusStrip1.ResumeLayout(false);
             this.statusStrip1.PerformLayout();
@@ -430,13 +466,16 @@
         private ECController.Theme.FluentButton btnRead;
         private ECController.Theme.FluentCard cardOptions;
         private ECController.Theme.FluentCheckBox chkAutoStart;
+        private ECController.Theme.FluentCheckBox chkTray;
         private ECController.Theme.FluentCheckBox chkApplyBoot;
-        private System.Windows.Forms.Label lblBootMode;
-        private ECController.Theme.FluentComboBox cmbBootMode;
         private System.Windows.Forms.Label lblBootDelay;
         private ECController.Theme.FluentNumericUpDown numBootDelay;
         private System.Windows.Forms.Label lblDelayUnit;
-        private ECController.Theme.FluentCheckBox chkTray;
+        private System.Windows.Forms.Label lblBootGroupsHint;
+        private System.Windows.Forms.Panel pnlBootGroups;
+        private System.Windows.Forms.Panel pnlSave;
+        private ECController.Theme.FluentButton btnSaveConfig;
+        private System.Windows.Forms.Label lblSaveState;
         private System.Windows.Forms.Panel pnlActions;
         private ECController.Theme.FluentButton btnApply;
         private ECController.Theme.FluentButton btnRestore;
