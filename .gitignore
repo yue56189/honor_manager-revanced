@@ -1,0 +1,39 @@
+# 构建产物
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
+# Visual Studio / 编辑器
+.vs/
+*.sln.docstates
+
+# 运行期生成（不含随包分发的资源）
+Logs/
+config.json
+config.json.bad
+*.log
+
+# 发布/打包产物
+publish/
+dist/
+
+# 编译中间产物
+*.pdb
+*.cache
+*.tlog
+*.obj
+*.iobj
+*.ipch
+*.recipe
+*.lastbuildstate
+*.ilk
+*.exp
+*.lib
+
+# 第三方 winring0 的构建输出
+winring0/**/*.db
+winring0/**/*.res
+winring0/**/Debug/
+winring0/**/Release/

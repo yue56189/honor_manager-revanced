@@ -1,0 +1,27 @@
+# EC Address Configuration
+
+[性能模式]
+
+智能模式
+78=00
+79=A0
+
+Hunter1
+78=AA
+79=AA
+
+Hunter2
+78=AA
+79=AB
+
+Hunter3
+78=AA
+79=AC
+
+Hunter4
+78=AA
+79=AD
+
+Hunter5
+78=AA
+79=A0
