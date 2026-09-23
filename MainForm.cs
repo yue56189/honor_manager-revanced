@@ -70,7 +70,7 @@ namespace ECController
                 "EC Controller {0}",
                 AssemblyVersionText);
 
-            string effect = Mica.Apply(Handle, false);
+            string effect = Mica.Apply(Handle, false, _settings.MicaTitleBar);
 
             Logger.Info("窗口特效：" + effect);
 
@@ -79,9 +79,6 @@ namespace ECController
             InitializeEc();
 
             _tray.SetVisible(_settings.Tray);
-
-            // 布局（含动态行撑高）定下来之后再合成底纹
-            RefreshBackdrop();
 
             Logger.Info(string.Format(
                 "字体：{0}（首选微软雅黑{1}）；开机启动={2}；登录自动应用={3}（{4} 项）。",
@@ -93,65 +90,20 @@ namespace ECController
         }
 
         /// <summary>
-        /// 重新合成客户区底纹。窗口移动后窗口下面那片壁纸换了，所以也要重做。
-        /// 读不到壁纸时返回 null，一切回退到窗体纯色底。
+        /// 客户区背景。
+        ///
+        /// 这里曾经贴一张"壁纸强模糊 + 浅色光罩"的位图来模拟 Mica。已改成纯色垂直渐变，
+        /// 原因是实测它太贵（PerfProbe，Windows 11 26200 / DPI 125%）：
+        ///   · 合成一张 548x804 的底纹要 49.5 ms，而窗口每移动 8px 就会重做一次
+        ///     → 拖动窗口 87 ms/帧，约 7 FPS，肉眼可见地卡
+        ///   · 位图 1:1 贴回来还要再花 7.1 ms/帧
+        /// 渐变则是一次填充，且移动、缩放窗口都不需要重算，观感差别很小。
         /// </summary>
-        private void RefreshBackdrop()
-        {
-            Bitmap backdrop = Mica.ComposeForControl(this, ClientSize);
-
-            FluentTheme.SetBackdrop(backdrop);
-
-            // StatusStrip 是原生控件，没法可靠地画半透明底；
-            // 底纹本身经过强模糊 + 浅色光罩后几乎均匀，用平均色视觉上等价。
-            statusStrip1.BackColor = backdrop != null
-                ? FluentTheme.BackdropAverage
-                : FluentTheme.WindowBackground;
-
-            _backdropOrigin = Location;
-
-            Invalidate(true);
-        }
-
         protected override void OnPaintBackground(PaintEventArgs e)
         {
-            Bitmap backdrop = FluentTheme.Backdrop;
-
-            if (backdrop != null)
-            {
-                e.Graphics.DrawImage(
-                    backdrop,
-                    ClientRectangle,
-                    new Rectangle(0, 0, backdrop.Width, backdrop.Height),
-                    GraphicsUnit.Pixel);
-
-                return;
-            }
-
-            base.OnPaintBackground(e);
-        }
-
-        protected override void OnMove(EventArgs e)
-        {
-            base.OnMove(e);
-
-            // 只有真的移动了才重算，避免无谓地反复读壁纸文件
-            int dx = Math.Abs(Location.X - _backdropOrigin.X);
-            int dy = Math.Abs(Location.Y - _backdropOrigin.Y);
-
-            if (dx >= 8 || dy >= 8)
-                RefreshBackdrop();
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-
-            // 动态行数变化会改变客户区高度，底纹要跟着重做尺寸
-            Bitmap backdrop = FluentTheme.Backdrop;
-
-            if (backdrop == null || backdrop.Size != ClientSize)
-                RefreshBackdrop();
+            // 渐变端点必须按整个客户区算，填充范围才是当前要重画的那块；
+            // 否则局部重绘时颜色会跳。见 FluentTheme.PaintWindowBackground。
+            FluentTheme.PaintWindowBackground(e.Graphics, ClientRectangle, e.ClipRectangle);
         }
 
         /// <summary>
@@ -1279,7 +1231,6 @@ namespace ECController
         {
             _tray.Dispose();
             ReleaseEc();
-            FluentTheme.SetBackdrop(null);
 
             Logger.Info("===== EC Controller 退出 =====");
 
@@ -1312,8 +1263,6 @@ namespace ECController
 
             Activate();
             BringToFront();
-
-            RefreshBackdrop();
         }
 
         private void OnTrayReapply(object sender, EventArgs e)

@@ -392,7 +392,10 @@ namespace ECController.Driver
                 ref needed);
 
             if (needed == 0)
+            {
+                Logger.Warn("查询服务配置未返回缓冲区大小，跳过驱动路径校验。");
                 return false;
+            }
 
             IntPtr buffer = Marshal.AllocHGlobal((int)needed);
 
@@ -401,17 +404,28 @@ namespace ECController.Driver
                 uint size = needed;
 
                 if (!NativeMethods.QueryServiceConfig(service, buffer, size, ref size))
+                {
+                    int queryCode = Marshal.GetLastWin32Error();
+
+                    Logger.Warn(string.Format(
+                        "查询服务配置失败（错误码 {0}：{1}），跳过驱动路径校验。",
+                        queryCode,
+                        EcAccessException.DescribeWin32Error(queryCode)));
                     return false;
+                }
 
-                // QUERY_SERVICE_CONFIG 的第一个字段就是 lpBinaryPathName（指针）
-                IntPtr pathPtr = Marshal.ReadIntPtr(buffer);
+                // 布局细节与坑见 QueryServiceConfigLayout 的注释：
+                // 路径指针不在偏移 0（那里是 dwServiceType/dwStartType），
+                // 按偏移 0 读会得到野指针，解引用直接 AccessViolationException 杀掉进程。
+                path = QueryServiceConfigLayout.ReadBinaryPathName(buffer, (int)size);
 
-                if (pathPtr == IntPtr.Zero)
+                if (string.IsNullOrEmpty(path))
+                {
+                    Logger.Warn("服务配置中读不到有效的驱动路径，跳过路径校验。");
                     return false;
+                }
 
-                path = Marshal.PtrToStringUni(pathPtr);
-
-                return !string.IsNullOrEmpty(path);
+                return true;
             }
             finally
             {

@@ -171,6 +171,7 @@ namespace ECController.Config
             sb.AppendLine("    \"AutoStart\": " + Bool(s.AutoStart) + ",");
             sb.AppendLine("    \"ApplyOnBoot\": " + Bool(s.ApplyOnBoot) + ",");
             sb.AppendLine("    \"Tray\": " + Bool(s.Tray) + ",");
+            sb.AppendLine("    \"MicaTitleBar\": " + Bool(s.MicaTitleBar) + ",");
             sb.AppendLine("    \"WaitTime\": " + s.WaitTime.ToString(CultureInfo.InvariantCulture) + ",");
             sb.AppendLine("    \"BootDelaySeconds\": " + s.BootDelaySeconds.ToString(CultureInfo.InvariantCulture) + ",");
 
@@ -258,6 +259,11 @@ namespace ECController.Config
 
                     case "Tray":
                         s.Tray = ParseBool(value, false);
+                        break;
+
+                    // 旧配置里没有这一项，缺失时保持默认开启
+                    case "MicaTitleBar":
+                        s.MicaTitleBar = ParseBool(value, true);
                         break;
 
                     // 旧版字段：读进来做迁移，不再写出

@@ -302,7 +302,11 @@
             //
             // pnlBootGroups
             //
-            this.pnlBootGroups.BackColor = System.Drawing.Color.Transparent;
+            // 这个面板整块落在白色卡片内部，底色直接用卡片白。
+            // **不要设成 Transparent**：透明容器（Panel）每次重绘都要请父级把它那块区域
+            // 重画一遍，而它里面的复选框也是透明的，于是每个子控件重绘都会再触发一次
+            // 父级重绘——形成重复绘制的放大。实测这一块曾占去整窗重绘 35ms 里的 13.5ms。
+            this.pnlBootGroups.BackColor = ECController.Theme.FluentTheme.CardBackground;
             this.pnlBootGroups.Location = new System.Drawing.Point(16, 134);
             this.pnlBootGroups.Name = "pnlBootGroups";
             this.pnlBootGroups.Size = new System.Drawing.Size(476, 46);

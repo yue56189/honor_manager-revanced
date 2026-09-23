@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 
 namespace ECController.Theme
 {
@@ -12,9 +13,12 @@ namespace ECController.Theme
     {
         // ---- 背景层次 ----
         /// <summary>
-        /// 窗体底色。也是"读不到壁纸/非 Win11"时的回退色。
+        /// 窗体底色（渐变的下端色）。
         /// </summary>
-        public static readonly Color WindowBackground = Color.FromArgb(243, 243, 243);
+        public static readonly Color WindowBackground = Color.FromArgb(233, 238, 244);
+
+        /// <summary>窗体渐变的顶端色。与 <see cref="WindowBackground"/> 共同构成极淡的垂直渐变。</summary>
+        public static readonly Color WindowBackgroundTop = Color.FromArgb(250, 251, 253);
 
         /// <summary>卡片/内容区底色</summary>
         public static readonly Color CardBackground = Color.FromArgb(255, 255, 255);
@@ -111,6 +115,58 @@ namespace ECController.Theme
         /// <summary>控件之间标准间距</summary>
         public const int Gap = 12;
 
+        // ---- 客户区背景 ----
+        //
+        // 这里曾经用"读桌面壁纸 → 强模糊 → 叠浅色光罩"合成一张位图来模拟 Mica。
+        // 实测（PerfProbe，Windows 11 26200 / DPI 125%）：
+        //   · 合成一次要 49.5 ms，而拖动窗口时每次位移都会重做 → 拖动 87 ms/帧
+        //   · 那张位图还要被 1:1 DrawImage 贴到客户区，GDI+ 不做硬件加速，占重绘 7.1 ms
+        // 换成一个纯色垂直渐变后，这两项开销归零，观感差异很小——
+        // 因为原来的位图经过强模糊 + 0.86 不透明度光罩之后，本身就几乎是一块均匀浅色。
+        //
+        // 结论：客户区不值得为"Mica 质感"付出这个代价。真材质只有标题栏拿得到
+        // （见 Mica 的注释），客户区本来就是仿的。
+
+        /// <summary>
+        /// 用窗体背景（垂直渐变）填充指定矩形。
+        ///
+        /// <paramref name="full"/> 是"渐变从哪到哪"，<paramref name="target"/> 是"要填哪块"。
+        /// 两者都在**窗体客户区坐标系**里。窗体自己整块重绘时两者相同；
+        /// 子控件要露出身后的窗体底色时，target 就是控件自己的矩形。
+        ///
+        /// 注意：渐变端点必须始终按整窗算，否则局部重绘时颜色会跳。
+        /// </summary>
+        public static void PaintWindowBackground(Graphics g, Rectangle full, Rectangle target)
+        {
+            if (g == null || full.Width <= 0 || full.Height <= 0 || target.Width <= 0 || target.Height <= 0)
+                return;
+
+            using (LinearGradientBrush brush = new LinearGradientBrush(
+                full, WindowBackgroundTop, WindowBackground, LinearGradientMode.Vertical))
+            {
+                g.FillRectangle(brush, target);
+            }
+        }
+
+        /// <summary>窗体背景在指定纵向位置的颜色（供无法透明的原生控件取用）。</summary>
+        public static Color WindowBackgroundAt(int y, int height)
+        {
+            if (height <= 0)
+                return WindowBackground;
+
+            return Blend(WindowBackgroundTop, WindowBackground,
+                Math.Max(0.0, Math.Min(1.0, y / (double)height)));
+        }
+
+        /// <summary>两色线性插值，t 为 0 取 a，为 1 取 b。</summary>
+        public static Color Blend(Color a, Color b, double t)
+        {
+            return Color.FromArgb(
+                (int)Math.Round(a.R + (b.R - a.R) * t),
+                (int)Math.Round(a.G + (b.G - a.G) * t),
+                (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
         // ---- 字体 ----
         private const string PreferFont = "微软雅黑";
         private const string FallbackFont = "Segoe UI";
@@ -120,8 +176,6 @@ namespace ECController.Theme
 
         /// <summary>
         /// 根据字号取得正文字体（微软雅黑优先，回退 Segoe UI）。
-        /// 字体族名字只解析一次——原来每次 new Font 都遍历整个 FontFamily.Families，
-        /// 控件多的时候这是个明显的启动开销。
         /// </summary>
         public static Font Font(float size, FontStyle style = FontStyle.Regular)
         {
@@ -168,97 +222,46 @@ namespace ECController.Theme
             get { return FontFamilyName == PreferFont; }
         }
 
-        /// <summary>标题字体（16pt 半粗）</summary>
-        public static Font TitleFont { get { return Font(13.5f, FontStyle.Bold); } }
-
-        /// <summary>小标题字体</summary>
-        public static Font SubtitleFont { get { return Font(10f, FontStyle.Bold); } }
-
-        /// <summary>正文字体</summary>
-        public static Font BodyFont { get { return Font(9.5f); } }
-
-        /// <summary>说明文字（略小、次要色）</summary>
-        public static Font CaptionFont { get { return Font(8.5f); } }
-
-        // ---- 客户区底纹（Mica 风格模拟）----
-        private static Bitmap _backdrop;
+        // 字体在这里缓存成实例。
+        //
+        // 这几项原来是只会 new 的只读属性，被控件的 OnPaint 直接调用——
+        // 也就是**每次重绘都新建 Font**。Font 内部持有 GDI+ 的原生对象，
+        // 靠终结器回收，所以不会泄漏句柄（实测 300 次重绘 GDI 对象增量 0），
+        // 但会持续制造垃圾并带来 GC 停顿。字体在一个进程里是恒定不变的，
+        // 缓存成常量实例即可，也让控件之间能安全共享。
+        //
+        // 共享是安全的：Control.Font 的 setter 会 Clone 传入的字体，
+        // 控件 Dispose 不会去释放调用方持有的实例。
+        private static readonly Font CachedTitle;
+        private static readonly Font CachedSubtitle;
+        private static readonly Font CachedBody;
+        private static readonly Font CachedCaption;
 
         /// <summary>
-        /// 当前窗体的客户区底纹。为空时一切回退到 <see cref="WindowBackground"/>。
-        ///
-        /// 由于 WinForms 里 DWM 材质进不了客户区（见 <see cref="Mica"/> 的注释），
-        /// 这里用"壁纸强模糊 + 浅色光罩"合成一张位图作为窗体背景，
-        /// 卡片圆角外侧等裸露区域也要从这张图里取色，否则会出现色块补丁。
+        /// 在静态构造里建缓存字体。这里刻意写 <c>new Font(字体族名, 字号, 样式)</c>
+        /// 而不是调用本类的 <see cref="Font(float, FontStyle)"/>——两者同名，
+        /// 用构造器形式可以避免"Font 到底是类还是方法"的解析歧义。
         /// </summary>
-        public static Bitmap Backdrop
+        static FluentTheme()
         {
-            get { return _backdrop; }
+            string family = FontFamilyName;
+
+            CachedTitle = new Font(family, 13.5f, FontStyle.Bold);
+            CachedSubtitle = new Font(family, 10f, FontStyle.Bold);
+            CachedBody = new Font(family, 9.5f);
+            CachedCaption = new Font(family, 8.5f);
         }
 
-        /// <summary>底纹在窗体上的平均色，用于 StatusStrip 等无法透明的原生控件。</summary>
-        public static Color BackdropAverage { get; private set; }
+        /// <summary>标题字体（16pt 半粗）</summary>
+        public static Font TitleFont { get { return CachedTitle; } }
 
-        public static void SetBackdrop(Bitmap bitmap)
-        {
-            if (ReferenceEquals(_backdrop, bitmap))
-                return;
+        /// <summary>小标题字体</summary>
+        public static Font SubtitleFont { get { return CachedSubtitle; } }
 
-            Bitmap old = _backdrop;
-            _backdrop = bitmap;
-            BackdropAverage = ComputeAverage(bitmap);
+        /// <summary>正文字体</summary>
+        public static Font BodyFont { get { return CachedBody; } }
 
-            if (old != null)
-                old.Dispose();
-        }
-
-        /// <summary>底纹上某点的颜色；没有底纹时返回窗体底色。</summary>
-        public static Color BackdropAt(int x, int y)
-        {
-            Bitmap bd = _backdrop;
-
-            if (bd == null)
-                return WindowBackground;
-
-            if (x < 0) x = 0;
-            if (y < 0) y = 0;
-            if (x >= bd.Width) x = bd.Width - 1;
-            if (y >= bd.Height) y = bd.Height - 1;
-
-            return bd.GetPixel(x, y);
-        }
-
-        private static Color ComputeAverage(Bitmap bitmap)
-        {
-            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
-                return WindowBackground;
-
-            try
-            {
-                // 抽样即可，不必遍历每个像素
-                int stepX = Math.Max(1, bitmap.Width / 24);
-                int stepY = Math.Max(1, bitmap.Height / 24);
-
-                long r = 0, g = 0, b = 0;
-                int n = 0;
-
-                for (int y = 0; y < bitmap.Height; y += stepY)
-                {
-                    for (int x = 0; x < bitmap.Width; x += stepX)
-                    {
-                        Color c = bitmap.GetPixel(x, y);
-                        r += c.R; g += c.G; b += c.B; n++;
-                    }
-                }
-
-                if (n == 0)
-                    return WindowBackground;
-
-                return Color.FromArgb((int)(r / n), (int)(g / n), (int)(b / n));
-            }
-            catch
-            {
-                return WindowBackground;
-            }
-        }
+        /// <summary>说明文字（略小、次要色）</summary>
+        public static Font CaptionFont { get { return CachedCaption; } }
     }
 }

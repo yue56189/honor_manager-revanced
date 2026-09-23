@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
@@ -6,26 +7,184 @@ using System.Windows.Forms;
 
 namespace ECController.Theme
 {
-    /// <summary>圆角与绘制工具的公共助手。</summary>
+    /// <summary>圆角与绘制工具的公共助手，附带绘制对象缓存。</summary>
     internal static class Draw
     {
+        // ------------------------------------------------------------------
+        // 缓存说明（重要）
+        //
+        // 自绘控件的 OnPaint 每次都会跑，里面 new 出来的 GraphicsPath / Pen / SolidBrush
+        // 全是 GDI+ 的原生对象。一张窗体有几十个自绘控件，一帧就是上百次原生分配。
+        // 这些对象的"形状"在整个进程里就那么几种，缓存起来一次建好即可。
+        //
+        // ⚠ 拿到缓存对象后**不要套 using**，也不要修改它的属性。
+        //   using 会在块结束时 Dispose，把缓存对象销毁，下一次绘制就抛
+        //   "使用已释放的对象"。原先这里都是 `using (Pen p = new Pen(...))` 的写法，
+        //   改成缓存后必须同步去掉 using。
+        // ------------------------------------------------------------------
+
+        private struct PathKey : IEquatable<PathKey>
+        {
+            private readonly int _x, _y, _w, _h, _r;
+
+            public PathKey(Rectangle rect, int radius)
+            {
+                _x = rect.X; _y = rect.Y; _w = rect.Width; _h = rect.Height; _r = radius;
+            }
+
+            public bool Equals(PathKey other)
+            {
+                return _x == other._x && _y == other._y && _w == other._w &&
+                       _h == other._h && _r == other._r;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is PathKey && Equals((PathKey)obj);
+            }
+
+            public override int GetHashCode()
+            {
+                return ((_x * 397 ^ _y) * 397 ^ _w) * 397 ^ _h * 31 ^ _r;
+            }
+        }
+
+        private static readonly Dictionary<PathKey, GraphicsPath> PathCache =
+            new Dictionary<PathKey, GraphicsPath>();
+
+        private static readonly Dictionary<int, Pen> PenCache = new Dictionary<int, Pen>();
+
+        private static readonly Dictionary<int, SolidBrush> BrushCache =
+            new Dictionary<int, SolidBrush>();
+
+        /// <summary>缓存上限。超过就整体清掉重建，避免极端情况下无限增长。</summary>
+        private const int CacheLimit = 192;
+
+        /// <summary>
+        /// 圆角矩形路径。结果被缓存，**不要用 using 包**，也不要修改返回值。
+        /// </summary>
         public static GraphicsPath RoundedRect(Rectangle r, int radius)
         {
+            PathKey key = new PathKey(r, radius);
+
+            GraphicsPath cached;
+            if (PathCache.TryGetValue(key, out cached))
+                return cached;
+
+            if (PathCache.Count >= CacheLimit)
+            {
+                foreach (GraphicsPath p in PathCache.Values)
+                    p.Dispose();
+
+                PathCache.Clear();
+            }
+
             GraphicsPath path = new GraphicsPath();
+
             if (radius <= 0)
             {
                 path.AddRectangle(r);
-                return path;
             }
-            int d = radius * 2;
-            if (d > r.Width) d = r.Width;
-            if (d > r.Height) d = r.Height;
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
+            else
+            {
+                int d = radius * 2;
+                if (d > r.Width) d = r.Width;
+                if (d > r.Height) d = r.Height;
+                if (d <= 0)
+                {
+                    path.AddRectangle(r);
+                }
+                else
+                {
+                    path.AddArc(r.X, r.Y, d, d, 180, 90);
+                    path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                    path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                    path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                    path.CloseFigure();
+                }
+            }
+
+            PathCache[key] = path;
+
             return path;
+        }
+
+        /// <summary>纯色填充刷。结果被缓存，**不要用 using 包**。</summary>
+        public static SolidBrush Fill(Color color)
+        {
+            int key = color.ToArgb();
+
+            SolidBrush cached;
+            if (BrushCache.TryGetValue(key, out cached))
+                return cached;
+
+            if (BrushCache.Count >= CacheLimit)
+            {
+                foreach (SolidBrush b in BrushCache.Values)
+                    b.Dispose();
+
+                BrushCache.Clear();
+            }
+
+            SolidBrush brush = new SolidBrush(color);
+            BrushCache[key] = brush;
+
+            return brush;
+        }
+
+        /// <summary>实线画笔（平头）。结果被缓存，**不要用 using 包**。</summary>
+        public static Pen Stroke(Color color, float width)
+        {
+            // width 只用到 1 / 1.6 / 1.8 这几个值，量化到 0.1px 做 key 足够
+            int key = color.ToArgb() * 31 + (int)Math.Round(width * 10);
+
+            Pen cached;
+            if (PenCache.TryGetValue(key, out cached))
+                return cached;
+
+            if (PenCache.Count >= CacheLimit)
+            {
+                foreach (Pen p in PenCache.Values)
+                    p.Dispose();
+
+                PenCache.Clear();
+            }
+
+            Pen pen = new Pen(color, width);
+            PenCache[key] = pen;
+
+            return pen;
+        }
+
+        /// <summary>
+        /// 圆头圆角画笔（画勾、折线箭头用）。
+        /// 与 <see cref="Stroke"/> 分开缓存，因为线帽是画笔自身的属性，不能混用。
+        /// </summary>
+        public static Pen StrokeRound(Color color, float width)
+        {
+            // 用负数区间避开与 Stroke 的 key 相撞
+            int key = -(color.ToArgb() * 31 + (int)Math.Round(width * 10) + 1);
+
+            Pen cached;
+            if (PenCache.TryGetValue(key, out cached))
+                return cached;
+
+            if (PenCache.Count >= CacheLimit)
+            {
+                foreach (Pen p in PenCache.Values)
+                    p.Dispose();
+
+                PenCache.Clear();
+            }
+
+            Pen pen = new Pen(color, width);
+            pen.StartCap = LineCap.Round;
+            pen.EndCap = LineCap.Round;
+            pen.LineJoin = LineJoin.Round;
+
+            PenCache[key] = pen;
+
+            return pen;
         }
 
         /// <summary>抗锯齿绘制开关（绘制完务必恢复）。</summary>
@@ -75,40 +234,65 @@ namespace ECController.Theme
         /// <summary>用父控件的底色铺满控件区域（父级为空的极端情况回退到窗体底色）。</summary>
         public static void Fill(Control c, Graphics g)
         {
-            // 父级是窗体时，窗体底不是纯色而是 Mica 风格底纹位图，
-            // 必须把对应位置那片像素贴过来，否则圆角外侧会出现纯色补丁。
-            if (TryFillFromBackdrop(c, g))
-                return;
+            // 向上找第一个"真正有底色"的祖先：
+            //   · 遇到窗体 —— 身后是窗体的**渐变**底，要按控件所在的纵向区段取色；
+            //   · 遇到不透明的普通容器 —— 直接用它的 BackColor。
+            // 不能只看直接父级：父级若是 Transparent，取到的 A=0 会造成纯色补丁，
+            // 而且透明容器本身还会引发重复绘制（见 MainForm.Designer.cs 里 pnlBootGroups 的注释）。
+            Control ancestor = c.Parent;
+            Form form = null;
+            Color solid = Color.Empty;
 
-            Color outer = c.Parent != null ? c.Parent.BackColor : FluentTheme.WindowBackground;
-            if (outer.A == 0) outer = FluentTheme.WindowBackground;
+            while (ancestor != null)
+            {
+                Form asForm = ancestor as Form;
 
-            using (SolidBrush b = new SolidBrush(outer))
-                g.FillRectangle(b, c.ClientRectangle);
-        }
+                if (asForm != null)
+                {
+                    form = asForm;
+                    break;
+                }
 
-        /// <summary>
-        /// 直接子控件位于窗体上时，从窗体底纹位图里取它那一块贴过来。
-        /// 子控件坐标就是窗体客户区坐标，所以不需要再做坐标换算。
-        /// </summary>
-        private static bool TryFillFromBackdrop(Control c, Graphics g)
-        {
-            Bitmap backdrop = FluentTheme.Backdrop;
+                if (ancestor.BackColor.A != 0)
+                {
+                    solid = ancestor.BackColor;
+                    break;
+                }
 
-            if (backdrop == null || c.Parent == null || !(c.Parent is Form))
-                return false;
+                ancestor = ancestor.Parent;
+            }
 
-            Rectangle src = new Rectangle(c.Left, c.Top, c.Width, c.Height);
-            Rectangle inter = Rectangle.Intersect(src, new Rectangle(0, 0, backdrop.Width, backdrop.Height));
+            if (form != null && !form.IsDisposed)
+            {
+                Rectangle full = form.ClientRectangle;
 
-            if (inter.IsEmpty)
-                return false;
+                if (full.Height > 0)
+                {
+                    // 线性渐变在任意纵向区段上仍是线性渐变，所以按控件上下沿各自
+                    // 对应的比例取端点色即可，不需要做坐标变换或贴位图。
+                    Point origin = form.PointToClient(c.PointToScreen(Point.Empty));
+                    double top = origin.Y / (double)full.Height;
+                    double bottom = (origin.Y + c.Height) / (double)full.Height;
 
-            Rectangle dest = new Rectangle(inter.X - src.X, inter.Y - src.Y, inter.Width, inter.Height);
+                    Color c1 = FluentTheme.Blend(FluentTheme.WindowBackgroundTop,
+                        FluentTheme.WindowBackground, top);
+                    Color c2 = FluentTheme.Blend(FluentTheme.WindowBackgroundTop,
+                        FluentTheme.WindowBackground, bottom);
 
-            g.DrawImage(backdrop, dest, inter, GraphicsUnit.Pixel);
+                    using (LinearGradientBrush gradient = new LinearGradientBrush(
+                        c.ClientRectangle, c1, c2, LinearGradientMode.Vertical))
+                    {
+                        g.FillRectangle(gradient, c.ClientRectangle);
+                    }
 
-            return true;
+                    return;
+                }
+            }
+
+            if (solid.A == 0)
+                solid = FluentTheme.WindowBackground;
+
+            g.FillRectangle(Draw.Fill(solid), c.ClientRectangle);
         }
     }
 
@@ -157,13 +341,10 @@ namespace ECController.Theme
             Draw.WithSmoothing(e.Graphics, g =>
             {
                 Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (GraphicsPath path = Draw.RoundedRect(r, FluentTheme.CornerRadius))
-                {
-                    using (SolidBrush b = new SolidBrush(FluentTheme.CardBackground))
-                        g.FillPath(b, path);
-                    using (Pen p = new Pen(FluentTheme.CardBorder, 1f))
-                        g.DrawPath(p, path);
-                }
+                GraphicsPath path = Draw.RoundedRect(r, FluentTheme.CornerRadius);
+
+                g.FillPath(Draw.Fill(FluentTheme.CardBackground), path);
+                g.DrawPath(Draw.Stroke(FluentTheme.CardBorder, 1f), path);
 
                 if (!string.IsNullOrEmpty(_title))
                 {
@@ -248,12 +429,13 @@ namespace ECController.Theme
             Draw.WithSmoothing(e.Graphics, g =>
             {
                 Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (GraphicsPath path = Draw.RoundedRect(r, FluentTheme.InputCornerRadius))
-                {
-                    using (SolidBrush b = new SolidBrush(back)) g.FillPath(b, path);
-                    if (border != Color.Empty)
-                        using (Pen p = new Pen(border, 1f)) g.DrawPath(p, path);
-                }
+                GraphicsPath path = Draw.RoundedRect(r, FluentTheme.InputCornerRadius);
+
+                g.FillPath(Draw.Fill(back), path);
+
+                if (border != Color.Empty)
+                    g.DrawPath(Draw.Stroke(border, 1f), path);
+
                 Draw.DrawTextCentered(e.Graphics, Text, Font, fore, r);
             });
         }
@@ -313,30 +495,24 @@ namespace ECController.Theme
                                : FluentTheme.CardBorder;
                 }
 
-                using (GraphicsPath path = Draw.RoundedRect(box, 4))
-                {
-                    using (SolidBrush b = new SolidBrush(fill)) g.FillPath(b, path);
-                    if (border != Color.Empty)
-                        using (Pen p = new Pen(border, 1f)) g.DrawPath(p, path);
-                }
+                GraphicsPath path = Draw.RoundedRect(box, 4);
+
+                g.FillPath(Draw.Fill(fill), path);
+
+                if (border != Color.Empty)
+                    g.DrawPath(Draw.Stroke(border, 1f), path);
 
                 if (Checked)
                 {
                     // 勾：两段折线，白色 1.6px 圆头
-                    using (Pen p = new Pen(Color.White, 1.8f))
+                    float cx = box.X + box.Width / 2f;
+                    float cy = box.Y + box.Height / 2f;
+                    g.DrawLines(Draw.StrokeRound(Color.White, 1.8f), new[]
                     {
-                        p.StartCap = LineCap.Round;
-                        p.EndCap = LineCap.Round;
-                        p.LineJoin = LineJoin.Round;
-                        float cx = box.X + box.Width / 2f;
-                        float cy = box.Y + box.Height / 2f;
-                        g.DrawLines(p, new[]
-                        {
-                            new PointF(cx - 3.6f, cy + 0.2f),
-                            new PointF(cx - 1.1f, cy + 2.8f),
-                            new PointF(cx + 3.8f, cy - 2.9f)
-                        });
-                    }
+                        new PointF(cx - 3.6f, cy + 0.2f),
+                        new PointF(cx - 1.1f, cy + 2.8f),
+                        new PointF(cx + 3.8f, cy - 2.9f)
+                    });
                 }
 
                 Rectangle textRect = new Rectangle(box.Right + 8, 0, Math.Max(0, Width - box.Right - 8), Height);
@@ -372,7 +548,8 @@ namespace ECController.Theme
         protected override void WndProc(ref Message m)
         {
             base.WndProc(ref m);
-            // 0x000F = WM_PAINT，绘制完成后补上箭头与边框
+            // 0x000F = WM_PAINT，绘制完成后补上箭头与边框。
+            // 原生 ComboBox 不设 UserPaint，WinForms 不会调 OnPaint，只能在这里补画。
             if (m.Msg == 0x000F)
             {
                 using (Graphics g = Graphics.FromHwnd(Handle))
@@ -386,30 +563,23 @@ namespace ECController.Theme
             {
                 // 原生 ComboBox 会在右端自己画一个下拉按钮和箭头，与这里的自绘 V 叠在一起
                 // 变成"两个箭头"。先用控件底色把右端这一条盖掉，再画我们自己的边框和箭头。
-                using (SolidBrush b = new SolidBrush(FluentTheme.InputBackground))
-                    gg.FillRectangle(b, new Rectangle(
-                        Math.Max(0, Width - ArrowAreaWidth), 1,
-                        Math.Max(0, ArrowAreaWidth - 1), Math.Max(0, Height - 2)));
+                gg.FillRectangle(Draw.Fill(FluentTheme.InputBackground), new Rectangle(
+                    Math.Max(0, Width - ArrowAreaWidth), 1,
+                    Math.Max(0, ArrowAreaWidth - 1), Math.Max(0, Height - 2)));
 
                 Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (Pen p = new Pen(_hover ? FluentTheme.InputBorderHover : FluentTheme.InputBorder, 1f))
-                    gg.DrawRectangle(p, r);
+                gg.DrawRectangle(Draw.Stroke(
+                    _hover ? FluentTheme.InputBorderHover : FluentTheme.InputBorder, 1f), r);
 
                 // 右侧下拉箭头（V 形折线）
                 float cx = Width - 16f;
                 float cy = Height / 2f;
-                using (Pen p = new Pen(FluentTheme.TextSecondary, 1.6f))
+                gg.DrawLines(Draw.StrokeRound(FluentTheme.TextSecondary, 1.6f), new[]
                 {
-                    p.StartCap = LineCap.Round;
-                    p.EndCap = LineCap.Round;
-                    p.LineJoin = LineJoin.Round;
-                    gg.DrawLines(p, new[]
-                    {
-                        new PointF(cx - 4f, cy - 2f),
-                        new PointF(cx, cy + 2f),
-                        new PointF(cx + 4f, cy - 2f)
-                    });
-                }
+                    new PointF(cx - 4f, cy - 2f),
+                    new PointF(cx, cy + 2f),
+                    new PointF(cx + 4f, cy - 2f)
+                });
             });
         }
     }
@@ -484,16 +654,14 @@ namespace ECController.Theme
                     : (on ? (_hover ? FluentTheme.InputBorderHover : FluentTheme.InputBorder)
                           : FluentTheme.CardBorder);
 
-                using (Pen p = new Pen(ring, Checked ? 1.6f : 1f))
-                    g.DrawEllipse(p, box);
+                g.DrawEllipse(Draw.Stroke(ring, Checked ? 1.6f : 1f), box);
 
                 if (Checked)
                 {
                     int inset = 5;
                     Rectangle inner = new Rectangle(box.X + inset, box.Y + inset,
                         box.Width - inset * 2, box.Height - inset * 2);
-                    using (SolidBrush b = new SolidBrush(on ? FluentTheme.Accent : FluentTheme.AccentDisabled))
-                        g.FillEllipse(b, inner);
+                    g.FillEllipse(Draw.Fill(on ? FluentTheme.Accent : FluentTheme.AccentDisabled), inner);
                 }
 
                 Rectangle textRect = new Rectangle(box.Right + 8, 0, Math.Max(0, Width - box.Right - 8), Height);

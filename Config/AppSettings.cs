@@ -23,6 +23,15 @@ namespace ECController.Config
         public bool Tray { get; set; }
 
         /// <summary>
+        /// 标题栏是否使用系统 Mica 材质（Win11 22H2+）。
+        ///
+        /// 默认开启：这一项由 DWM 合成器绘制，**不占本进程 CPU**，
+        /// 而客户区那套"壁纸模糊模拟"因为太吃性能已被移除（见 Theme\Mica.cs）。
+        /// 想彻底关掉窗口材质时设为 false——圆角与深色标题栏仍会保留。
+        /// </summary>
+        public bool MicaTitleBar { get; set; }
+
+        /// <summary>
         /// 登录自动应用时要套用的选择，每个功能组最多一项。
         /// 顺序即应用顺序。
         /// </summary>
@@ -48,6 +57,7 @@ namespace ECController.Config
             AutoStart = false;
             ApplyOnBoot = false;
             Tray = false;
+            MicaTitleBar = true;
             BootSelections = new List<BootSelection>();
             WaitTime = 5;
             BootDelaySeconds = 5;
@@ -170,6 +180,7 @@ namespace ECController.Config
             if (AutoStart != other.AutoStart ||
                 ApplyOnBoot != other.ApplyOnBoot ||
                 Tray != other.Tray ||
+                MicaTitleBar != other.MicaTitleBar ||
                 WaitTime != other.WaitTime ||
                 BootDelaySeconds != other.BootDelaySeconds)
             {

@@ -29,6 +29,8 @@ namespace ECController
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            InstallCrashHandlers();
+
             bool applyOnly = HasArgument(args, ApplyOnlyArg) &&
                 !HasArgument(args, ShowUiArg);
 
@@ -94,6 +96,51 @@ namespace ECController
                 StartupManager.Apply(settings.AutoStart);
 
             Application.Run(new MainForm(settings));
+        }
+
+        /// <summary>
+        /// 兜底异常记录。
+        ///
+        /// 起因：v1.0.1/1.0.2 在「驱动服务已存在」这条分支上会读到野指针并抛
+        /// AccessViolationException，而 .NET 4 默认把这类异常算作「损坏状态异常」，
+        /// 托管代码捕获不到 —— 进程当场消失，日志里一个字都没留，看起来就像
+        /// 「双击没反应」。排查时只能翻事件日志里的 .NET Runtime 1026。
+        ///
+        /// 这里能拦住的只有普通未处理异常（注意：<b>拦不住</b>损坏状态异常）。
+        /// 真正的防线是别产生野指针，见 Driver\QueryServiceConfigLayout.cs。
+        /// </summary>
+        private static void InstallCrashHandlers()
+        {
+            AppDomain.CurrentDomain.UnhandledException += delegate(
+                object sender, UnhandledExceptionEventArgs e)
+            {
+                try
+                {
+                    Logger.Error("未处理异常，进程即将终止。", e.ExceptionObject as Exception);
+                }
+                catch
+                {
+                }
+            };
+
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+
+            Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e)
+            {
+                try
+                {
+                    Logger.Error("界面线程未处理异常。", e.Exception);
+                }
+                catch
+                {
+                }
+
+                ShowError(
+                    "EC Controller",
+                    "程序遇到未处理的错误。\n\n"
+                    + (e.Exception == null ? "未知错误。" : e.Exception.Message)
+                    + "\n\n详细信息已写入 Logs\\ 目录下的日志文件。");
+            };
         }
 
         /// <summary>
